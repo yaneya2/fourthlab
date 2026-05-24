@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include "ArraySequence.h"
+#include "ForecastCorrection.h"
 #include "LazySequence.h"
 #include "MutableArraySequence.h"
 #include "Streams.h"
@@ -440,4 +441,146 @@ TEST(Load, MillionElementLazyStream) {
 
     EXPECT_EQ(sum, 500000500000LL);
     EXPECT_EQ(naturals->GetMaterializedCount(), count);
+}
+
+TEST(ForecastCorrection, HistoryBufferKeepsOnlyLatestEvents) {
+    HistoryBuffer history(3);
+    history.Add(Event{1, 1, EventType::CpuLoad, 10.0, "test"});
+    history.Add(Event{2, 2, EventType::CpuLoad, 20.0, "test"});
+    history.Add(Event{3, 3, EventType::CpuLoad, 30.0, "test"});
+    history.Add(Event{4, 4, EventType::CpuLoad, 40.0, "test"});
+
+    EXPECT_EQ(history.GetLength(), static_cast<std::size_t>(3));
+    EXPECT_DOUBLE_EQ(history.Get(0).value, 20.0);
+    EXPECT_DOUBLE_EQ(history.GetFromEnd(0).value, 40.0);
+    EXPECT_TRUE(history.CanPredict(3));
+    EXPECT_THROW(history.GetFromEnd(3), std::out_of_range);
+}
+
+TEST(ForecastCorrection, DifferenceModelPredictsFirstAndSecondOrder) {
+    HistoryBuffer history(4);
+    history.Add(Event{1, 1, EventType::CpuLoad, 10.0, "test"});
+    history.Add(Event{2, 2, EventType::CpuLoad, 12.0, "test"});
+
+    DifferenceForecastModel firstOrder(1);
+    Prediction first = firstOrder.PredictNext(history, EventType::CpuLoad);
+    ASSERT_TRUE(first.hasPrediction);
+    EXPECT_DOUBLE_EQ(first.predictedValue, 14.0);
+
+    DifferenceForecastModel secondOrder(2);
+    EXPECT_FALSE(secondOrder.PredictNext(history, EventType::CpuLoad).hasPrediction);
+    history.Add(Event{3, 3, EventType::CpuLoad, 15.0, "test"});
+    Prediction second = secondOrder.PredictNext(history, EventType::CpuLoad);
+    ASSERT_TRUE(second.hasPrediction);
+    EXPECT_DOUBLE_EQ(second.predictedValue, 19.0);
+
+    EXPECT_THROW(DifferenceForecastModel(3), std::invalid_argument);
+}
+
+TEST(ForecastCorrection, CorrectionAndDecisionClassifyDeviation) {
+    CorrectionService correctionService(10.0, 25.0);
+    DecisionMaker decisionMaker;
+    Prediction prediction{true, EventType::CpuLoad, 55.0, 0.75};
+
+    Event normal{1, 1, EventType::CpuLoad, 55.0, "server"};
+    Correction normalCorrection = correctionService.Compare(prediction, normal);
+    EXPECT_DOUBLE_EQ(normalCorrection.error, 0.0);
+    EXPECT_EQ(decisionMaker.MakeReaction(normal, normalCorrection).type, ReactionType::Normal);
+
+    Event warning{2, 2, EventType::CpuLoad, 70.0, "server"};
+    Correction warningCorrection = correctionService.Compare(prediction, warning);
+    EXPECT_DOUBLE_EQ(warningCorrection.error, 15.0);
+    EXPECT_EQ(decisionMaker.MakeReaction(warning, warningCorrection).type, ReactionType::Warning);
+
+    Event critical{3, 3, EventType::CpuLoad, 100.0, "server"};
+    Correction criticalCorrection = correctionService.Compare(prediction, critical);
+    EXPECT_DOUBLE_EQ(criticalCorrection.absoluteError, 45.0);
+    EXPECT_EQ(decisionMaker.MakeReaction(critical, criticalCorrection).type, ReactionType::Critical);
+
+    Correction absent = correctionService.Compare(Prediction{}, normal);
+    EXPECT_EQ(decisionMaker.MakeReaction(normal, absent).type, ReactionType::NoPrediction);
+    EXPECT_THROW(CorrectionService(20.0, 10.0), std::invalid_argument);
+}
+
+TEST(ForecastCorrection, ProcessorPredictsCorrectsAndSeparatesEventTypes) {
+    ForecastCorrectionProcessor processor(1, 4, 5.0, 20.0);
+
+    ProcessingResult first = processor.Process(Event{1, 1, EventType::CpuLoad, 10.0, "server"});
+    ProcessingResult second = processor.Process(Event{2, 2, EventType::CpuLoad, 20.0, "server"});
+    ProcessingResult memory = processor.Process(Event{3, 3, EventType::MemoryLoad, 90.0, "server"});
+    ProcessingResult third = processor.Process(Event{4, 4, EventType::CpuLoad, 35.0, "server"});
+
+    EXPECT_EQ(first.reaction.type, ReactionType::NoPrediction);
+    EXPECT_EQ(second.reaction.type, ReactionType::NoPrediction);
+    ASSERT_TRUE(second.nextPrediction.hasPrediction);
+    EXPECT_DOUBLE_EQ(second.nextPrediction.predictedValue, 30.0);
+    EXPECT_EQ(memory.reaction.type, ReactionType::NoPrediction);
+    EXPECT_EQ(third.reaction.type, ReactionType::Warning);
+    EXPECT_DOUBLE_EQ(third.correction.error, 5.0);
+    EXPECT_DOUBLE_EQ(third.nextPrediction.predictedValue, 50.0);
+    EXPECT_EQ(processor.GetHistory(EventType::CpuLoad).GetLength(), static_cast<std::size_t>(3));
+    EXPECT_EQ(processor.GetHistory(EventType::MemoryLoad).GetLength(), static_cast<std::size_t>(1));
+
+    EXPECT_THROW(ForecastCorrectionProcessor(2, 2, 5.0, 10.0), std::invalid_argument);
+}
+
+TEST(ForecastCorrection, LazyEventGeneratorProcessesAndWritesResults) {
+    auto events = EventGenerator::WithSpike(EventType::CpuLoad, 5, 10.0, 10.0, 3, 100.0, "test");
+    LazySequenceReadStream<Event> input(*events);
+    MutableArraySequence<ProcessingResult> results;
+    SequenceWriteStream<ProcessingResult> output(results);
+    ForecastCorrectionProcessor processor(1, 4, 10.0, 25.0);
+    ProcessingStatistics statistics;
+
+    input.Open();
+    output.Open();
+    while (!input.IsEndOfStream()) {
+        ProcessingResult result = processor.Process(input.Read());
+        output.Write(result);
+        statistics.Add(result);
+    }
+    input.Close();
+    output.Close();
+
+    EXPECT_EQ(results.GetLength(), static_cast<std::size_t>(5));
+    EXPECT_EQ(statistics.GetTotal(), static_cast<std::size_t>(5));
+    EXPECT_EQ(statistics.GetCriticalCount(), static_cast<std::size_t>(2));
+    EXPECT_EQ(events->GetMaterializedCount(), static_cast<std::size_t>(5));
+    EXPECT_EQ(results.Get(3).reaction.type, ReactionType::Critical);
+    EXPECT_NE(SerializeProcessingResult(results.Get(3)).find("CRITICAL"), std::string::npos);
+}
+
+TEST(ForecastCorrection, EventCsvSerializationRoundTrips) {
+    Event event{17, 5000, EventType::Temperature, 36.5, "sensor-1"};
+
+    Event restored = DeserializeEvent(SerializeEvent(event));
+
+    EXPECT_EQ(restored.id, event.id);
+    EXPECT_EQ(restored.timestamp, event.timestamp);
+    EXPECT_EQ(restored.type, event.type);
+    EXPECT_DOUBLE_EQ(restored.value, event.value);
+    EXPECT_EQ(restored.source, event.source);
+    EXPECT_THROW(DeserializeEvent("broken,line"), std::invalid_argument);
+}
+
+TEST(ForecastCorrection, ProcessesLargeLinearLazyEventStream) {
+    const std::size_t count = 100000;
+    auto events = EventGenerator::Linear(EventType::CpuLoad, count, 10.0, 0.5, "large-linear");
+    LazySequenceReadStream<Event> input(*events);
+    ForecastCorrectionProcessor processor(1, 8, 1.0, 5.0);
+    ProcessingStatistics statistics;
+
+    input.Open();
+    while (!input.IsEndOfStream()) {
+        statistics.Add(processor.Process(input.Read()));
+    }
+    input.Close();
+
+    EXPECT_EQ(statistics.GetTotal(), count);
+    EXPECT_EQ(statistics.GetNoPredictionCount(), static_cast<std::size_t>(2));
+    EXPECT_EQ(statistics.GetNormalCount(), count - 2);
+    EXPECT_EQ(statistics.GetWarningCount(), static_cast<std::size_t>(0));
+    EXPECT_EQ(statistics.GetCriticalCount(), static_cast<std::size_t>(0));
+    EXPECT_DOUBLE_EQ(statistics.GetMaximumAbsoluteError(), 0.0);
+    EXPECT_EQ(events->GetMaterializedCount(), count);
 }

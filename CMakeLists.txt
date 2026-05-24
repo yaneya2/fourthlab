@@ -11,6 +11,7 @@ set(FOURTHLAB_HEADERS
         classes/headers/ArraySequence.h
         classes/headers/Cardinal.h
         classes/headers/DynamicArray.h
+        classes/headers/ForecastCorrection.h
         classes/headers/IEnumerator.h
         classes/headers/LazySequence.h
         classes/headers/LinkedList.h

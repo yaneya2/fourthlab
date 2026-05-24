@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "ForecastCorrection.h"
 #include "LazySequence.h"
 #include "MutableArraySequence.h"
 #include "Streams.h"
@@ -511,6 +512,242 @@ namespace {
 		}
 	}
 
+	struct ForecastSettings {
+		std::size_t order = 1;
+		std::size_t historySize = 8;
+		double warningThreshold = 10.0;
+		double criticalThreshold = 25.0;
+	};
+
+	EventType ReadEventType() {
+		std::cout << "1. CPU_LOAD\n2. MEMORY_LOAD\n3. TEMPERATURE\n4. REQUEST_ERRORS\n";
+		int choice = ReadValue<int>("Тип события: ");
+		if (choice == 1) {
+			return EventType::CpuLoad;
+		}
+		if (choice == 2) {
+			return EventType::MemoryLoad;
+		}
+		if (choice == 3) {
+			return EventType::Temperature;
+		}
+		if (choice == 4) {
+			return EventType::RequestErrors;
+		}
+		throw std::invalid_argument("Неизвестный тип события");
+	}
+
+	void ConfigureForecast(ForecastSettings &settings) {
+		settings.order = ReadValue<std::size_t>("Порядок прогноза (1 или 2): ");
+		settings.historySize = ReadValue<std::size_t>("Максимальный размер истории: ");
+		settings.warningThreshold = ReadValue<double>("Порог WARNING: ");
+		settings.criticalThreshold = ReadValue<double>("Порог CRITICAL: ");
+		ForecastCorrectionProcessor validation(settings.order, settings.historySize,
+		                                       settings.warningThreshold, settings.criticalThreshold);
+		std::cout << "Настройки приняты.\n";
+	}
+
+	void PrintForecastSettings(const ForecastSettings &settings) {
+		std::cout << "Порядок: " << settings.order
+		          << ", история: " << settings.historySize
+		          << ", WARNING: " << settings.warningThreshold
+		          << ", CRITICAL: " << settings.criticalThreshold << "\n";
+	}
+
+	void PrintProcessingResult(const ProcessingResult &result) {
+		std::cout << "\nСобытие #" << result.currentEvent.id
+		          << ", t=" << result.currentEvent.timestamp
+		          << ", " << EventTypeToString(result.currentEvent.type)
+		          << "=" << result.currentEvent.value
+		          << ", источник=" << result.currentEvent.source << "\n";
+		std::cout << "Предыдущий прогноз: ";
+		if (result.previousPrediction.hasPrediction) {
+			std::cout << result.previousPrediction.predictedValue
+			          << " (confidence=" << result.previousPrediction.confidence << ")\n";
+		} else {
+			std::cout << "нет\n";
+		}
+		std::cout << "Коррекция: ";
+		if (result.correction.hasCorrection) {
+			std::cout << "ошибка=" << result.correction.error
+			          << ", абсолютная ошибка=" << result.correction.absoluteError << "\n";
+		} else {
+			std::cout << "не выполнялась\n";
+		}
+		std::cout << "Реакция: " << ReactionTypeToString(result.reaction.type)
+		          << " - " << result.reaction.message << "\n";
+		std::cout << "Следующий прогноз: ";
+		if (result.nextPrediction.hasPrediction) {
+			std::cout << result.nextPrediction.predictedValue << "\n";
+		} else {
+			std::cout << "ещё нет данных\n";
+		}
+	}
+
+	void PrintStatistics(const ProcessingStatistics &statistics, std::size_t materializedCount,
+	                     long long elapsedMilliseconds) {
+		std::cout << "\nСтатистика обработки\n";
+		std::cout << "Событий: " << statistics.GetTotal() << "\n";
+		std::cout << "NO_PREDICTION: " << statistics.GetNoPredictionCount() << "\n";
+		std::cout << "NORMAL: " << statistics.GetNormalCount() << "\n";
+		std::cout << "WARNING: " << statistics.GetWarningCount() << "\n";
+		std::cout << "CRITICAL: " << statistics.GetCriticalCount() << "\n";
+		std::cout << "Средняя абсолютная ошибка: " << statistics.GetMeanAbsoluteError() << "\n";
+		std::cout << "Максимальная абсолютная ошибка: " << statistics.GetMaximumAbsoluteError() << "\n";
+		std::cout << "Материализовано событий LazySequence: " << materializedCount << "\n";
+		std::cout << "Время: " << elapsedMilliseconds << " мс\n";
+	}
+
+	void SaveProcessingLog(const MutableArraySequence<ProcessingResult> &log) {
+		std::string filename = ReadLine("Имя CSV-файла для сохранения лога: ");
+		FileWriteStream<ProcessingResult> writer(filename, SerializeProcessingResult);
+		writer.Open();
+		std::unique_ptr<IEnumerator<ProcessingResult> > enumerator(log.GetEnumerator());
+		while (enumerator->MoveNext()) {
+			writer.Write(enumerator->Current());
+		}
+		writer.Close();
+		std::cout << "Лог сохранён в " << filename << "\n";
+	}
+
+	void ProcessEventScenario(LazySequence<Event> &events, const ForecastSettings &settings,
+	                          bool stepByStep, std::size_t maximumCount) {
+		ForecastCorrectionProcessor processor(settings.order, settings.historySize,
+		                                      settings.warningThreshold, settings.criticalThreshold);
+		ProcessingStatistics statistics;
+		MutableArraySequence<ProcessingResult> log;
+		SequenceWriteStream<ProcessingResult> output(log);
+		LazySequenceReadStream<Event> input(events);
+		input.Open();
+		output.Open();
+
+		auto start = std::chrono::steady_clock::now();
+		std::size_t processed = 0;
+		while (processed < maximumCount && !input.IsEndOfStream()) {
+			ProcessingResult result = processor.Process(input.Read());
+			output.Write(result);
+			statistics.Add(result);
+			++processed;
+			if (stepByStep) {
+				PrintProcessingResult(result);
+				if (ReadValue<int>("Продолжить? (1 - да, 0 - остановить): ") == 0) {
+					break;
+				}
+			}
+		}
+		auto finish = std::chrono::steady_clock::now();
+		input.Close();
+		output.Close();
+		auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count();
+
+		PrintStatistics(statistics, events.GetMaterializedCount(), elapsed);
+		if (ReadValue<int>("Сохранить лог результатов? (1 - да, 0 - нет): ") == 1) {
+			SaveProcessingLog(log);
+		}
+	}
+
+	std::unique_ptr<LazySequence<Event> > ReadManualEvents() {
+		std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+		MutableArraySequence<Event> events;
+		for (std::size_t i = 0; i < count; ++i) {
+			std::cout << "\nСобытие #" << (i + 1) << "\n";
+			EventType type = ReadEventType();
+			long long timestamp = ReadValue<long long>("Время: ");
+			double value = ReadValue<double>("Значение: ");
+			std::string source = ReadLine("Источник: ");
+			events.Append(Event{i + 1, timestamp, type, value, source});
+		}
+		return std::make_unique<LazySequence<Event> >(static_cast<const Sequence<Event> &>(events));
+	}
+
+	std::unique_ptr<LazySequence<Event> > ReadEventsFromFile() {
+		std::string filename = ReadLine("CSV-файл событий: ");
+		FileReadStream<Event> reader(filename, DeserializeEvent);
+		MutableArraySequence<Event> events;
+		reader.Open();
+		while (true) {
+			try {
+				events.Append(reader.Read());
+			} catch (const EndOfStream &) {
+				break;
+			}
+		}
+		reader.Close();
+		return std::make_unique<LazySequence<Event> >(static_cast<const Sequence<Event> &>(events));
+	}
+
+	void RunForecastScenario(std::unique_ptr<LazySequence<Event> > events, const ForecastSettings &settings) {
+		std::size_t available = events->GetLength().IsFinite()
+			                        ? events->GetLength().Value()
+			                        : ReadValue<std::size_t>("Количество обрабатываемых событий: ");
+		std::size_t count = ReadValue<std::size_t>("Сколько событий обработать (не более доступных): ");
+		if (count > available) {
+			count = available;
+		}
+		bool stepByStep = ReadValue<int>("Пошаговый вывод? (1 - да, 0 - нет): ") == 1;
+		ProcessEventScenario(*events, settings, stepByStep, count);
+	}
+
+	void ForecastCorrectionPanel() {
+		ForecastSettings settings;
+		while (true) {
+			std::cout << "\nВариант 3.3: прогноз / коррекция\n";
+			PrintForecastSettings(settings);
+			std::cout << "1. Настройки модели\n";
+			std::cout << "2. Ручной ввод событий\n";
+			std::cout << "3. Линейный поток (точный прогноз)\n";
+			std::cout << "4. Поток с резким скачком\n";
+			std::cout << "5. Поток с шумом\n";
+			std::cout << "6. Загрузить события из CSV-файла\n";
+			std::cout << "7. Автоматический большой поток со скачком\n";
+			std::cout << "0. Назад\n";
+			int choice = ReadValue<int>("Выбор: ");
+			if (choice == 0) {
+				return;
+			}
+			try {
+				if (choice == 1) {
+					ConfigureForecast(settings);
+				} else if (choice == 2) {
+					RunForecastScenario(ReadManualEvents(), settings);
+				} else if (choice == 3) {
+					EventType type = ReadEventType();
+					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+					double first = ReadValue<double>("Первое значение: ");
+					double step = ReadValue<double>("Шаг: ");
+					RunForecastScenario(EventGenerator::Linear(type, count, first, step, "linear"), settings);
+				} else if (choice == 4) {
+					EventType type = ReadEventType();
+					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+					double first = ReadValue<double>("Первое значение: ");
+					double step = ReadValue<double>("Шаг до скачка: ");
+					std::size_t spike = ReadValue<std::size_t>("Индекс скачка (с нуля): ");
+					double spikeValue = ReadValue<double>("Значение скачка: ");
+					RunForecastScenario(EventGenerator::WithSpike(type, count, first, step, spike,
+					                                             spikeValue, "spike"), settings);
+				} else if (choice == 5) {
+					EventType type = ReadEventType();
+					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+					double base = ReadValue<double>("Базовое значение: ");
+					double amplitude = ReadValue<double>("Амплитуда шума: ");
+					RunForecastScenario(EventGenerator::Noise(type, count, base, amplitude, "noise"), settings);
+				} else if (choice == 6) {
+					RunForecastScenario(ReadEventsFromFile(), settings);
+				} else if (choice == 7) {
+					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+					std::size_t spike = count / 2;
+					ProcessEventScenario(*EventGenerator::WithSpike(EventType::CpuLoad, count, 20.0, 0.01,
+					                                                spike, 95.0, "large"),
+					                     settings, false, count);
+				} else {
+					std::cout << "Неизвестная команда.\n";
+				}
+			} catch (const std::exception &error) {
+				std::cout << "Ошибка сценария: " << error.what() << "\n";
+			}
+		}
+	}
+
 	void RunAutomaticChecks() {
 		int items[] = {1, 2, 3};
 		LazySequence<int> sequence(items, 3);
@@ -587,6 +824,7 @@ namespace {
 		std::cout << "8. Встроенные автоматические проверки\n";
 		std::cout << "9. Нагрузочная проверка LazySequence\n";
 		std::cout << "10. Нагрузочная проверка файловых потоков\n";
+		std::cout << "11. Вариант 3.3: прогноз / коррекция событий\n";
 		std::cout << "0. Выход\n";
 	}
 }
@@ -616,6 +854,8 @@ void RunTestingUi() {
 				RunLazyLoadTest();
 			} else if (choice == 10) {
 				RunFileLoadTest();
+			} else if (choice == 11) {
+				ForecastCorrectionPanel();
 			} else if (choice == 0) {
 				return;
 			} else {
