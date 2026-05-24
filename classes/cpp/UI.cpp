@@ -1,7 +1,6 @@
 #include "UI.h"
 
 #include <chrono>
-#include <clocale>
 #include <cstddef>
 #include <cstdio>
 #include <functional>
@@ -10,112 +9,189 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+
 #include "LazySequence.h"
 #include "MutableArraySequence.h"
 #include "Streams.h"
 
 namespace {
-	class UiTestFailure : public std::runtime_error {
-	public:
-		explicit UiTestFailure(const std::string &message) : std::runtime_error(message) {
-		}
-	};
+	using Number = long long;
+	using Lazy = LazySequence<Number>;
 
-	void ClearInputLine() {
+	void ClearInput() {
 		std::cin.clear();
 		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 	}
 
 	template<class T>
 	T ReadValue(const std::string &prompt) {
-		T value{};
 		while (true) {
 			std::cout << prompt;
+			T value{};
 			if (std::cin >> value) {
 				return value;
 			}
-			ClearInputLine();
-			std::cout << "Некорректный ввод. Попробуйте ещё раз.\n";
+			ClearInput();
+			std::cout << "Некорректный ввод. Повторите попытку.\n";
 		}
 	}
 
-	std::string ReadTextLine(const std::string &prompt) {
+	std::string ReadLine(const std::string &prompt) {
 		std::cout << prompt;
-		std::string text;
-		std::getline(std::cin >> std::ws, text);
-		return text;
-	}
-
-	std::string FormatCardinal(const Cardinal &value) {
-		if (value.IsOmega()) {
-			return "омега (бесконечность)";
-		}
-		return std::to_string(value.Value());
-	}
-
-	void Require(bool condition, const std::string &message) {
-		if (!condition) {
-			throw UiTestFailure(message);
-		}
-	}
-
-	template<class T>
-	void RequireEqual(const T &actual, const T &expected, const std::string &message) {
-		if (!(actual == expected)) {
-			throw UiTestFailure(message);
-		}
-	}
-
-	template<class ExceptionT, class Action>
-	void RequireThrows(Action action, const std::string &message) {
-		try {
-			action();
-		} catch (const ExceptionT &) {
-			return;
-		} catch (...) {
-			throw UiTestFailure(message + ": выброшено исключение неверного типа");
-		}
-		throw UiTestFailure(message + ": исключение не было выброшено");
-	}
-
-	template <class T>
-	T GetAt(Sequence<T> *sequence, std::size_t index) {
-		auto *enumerator = sequence->GetEnumerator();
-		for (std::size_t i = 0; i <= index; ++i) {
-			if (!enumerator->MoveNext()) {
-				delete enumerator;
-				throw std::out_of_range("Индекс вне диапазона");
-			}
-		}
-		T value = enumerator->Current();
-		delete enumerator;
+		std::string value;
+		std::getline(std::cin >> std::ws, value);
 		return value;
 	}
 
-	long long FibonacciRule(Sequence<long long> *generated) {
-		std::size_t length = generated->GetLength();
-		if (length < 2) {
-			throw std::logic_error("Для Фибоначчи нужны два начальных элемента");
-		}
-		return GetAt(generated, length - 1) + GetAt(generated, length - 2);
+	std::string FormatLength(Cardinal length) {
+		return length.IsOmega() ? "омега (бесконечная)" : std::to_string(length.Value());
 	}
 
-	template <class T>
-	void PrintSequencePrefix(LazySequence<T> &sequence, std::size_t count) {
-		std::cout << "Значения: ";
+	Cardinal ReadLength() {
+		std::cout << "1. Конечная длина\n";
+		std::cout << "2. Бесконечная длина (омега)\n";
+		int choice = ReadValue<int>("Выбор: ");
+		if (choice == 2) {
+			return Cardinal::Omega();
+		}
+		return Cardinal::Finite(ReadValue<std::size_t>("Длина: "));
+	}
+
+	MutableArraySequence<Number> ReadItems() {
+		MutableArraySequence<Number> result;
+		std::size_t count = ReadValue<std::size_t>("Количество элементов: ");
 		for (std::size_t i = 0; i < count; ++i) {
-			if (i > 0) {
+			result.Append(ReadValue<Number>("Элемент[" + std::to_string(i) + "] = "));
+		}
+		return result;
+	}
+
+	std::unique_ptr<Lazy> CreateFiniteLazy() {
+		MutableArraySequence<Number> source = ReadItems();
+		return std::make_unique<Lazy>(static_cast<const Sequence<Number> &>(source));
+	}
+
+	template<class T>
+	T SequenceAt(Sequence<T> *sequence, std::size_t index) {
+		std::unique_ptr<IEnumerator<T> > enumerator(sequence->GetEnumerator());
+		for (std::size_t i = 0; i <= index; ++i) {
+			if (!enumerator->MoveNext()) {
+				throw std::out_of_range("Индекс вне диапазона");
+			}
+		}
+		return enumerator->Current();
+	}
+
+	Number FibonacciRule(Sequence<Number> *prefix) {
+		std::size_t length = prefix->GetLength();
+		if (length < 2) {
+			throw std::logic_error("Для чисел Фибоначчи нужны два начальных элемента");
+		}
+		return SequenceAt(prefix, length - 1) + SequenceAt(prefix, length - 2);
+	}
+
+	std::unique_ptr<Lazy> CreateByIndexRule(std::function<Number(std::size_t)> rule) {
+		Cardinal length = ReadLength();
+		if (length.IsOmega()) {
+			return Lazy::Infinite(std::move(rule));
+		}
+		return Lazy::FromIndexFunction(std::move(rule), length);
+	}
+
+	std::unique_ptr<Lazy> CreateGeneratedLazy() {
+		std::cout << "\nГенератор ленивой последовательности\n";
+		std::cout << "1. Числа Фибоначчи\n";
+		std::cout << "2. Арифметическая прогрессия\n";
+		std::cout << "3. Геометрическая прогрессия\n";
+		std::cout << "4. Квадраты натуральных чисел\n";
+		std::cout << "5. Кубы натуральных чисел\n";
+		std::cout << "6. Факториалы\n";
+		std::cout << "7. Линейная формула a*n + b\n";
+		std::cout << "8. Натуральные числа\n";
+		int choice = ReadValue<int>("Выбор: ");
+
+		if (choice == 1) {
+			Number seedsData[] = {0, 1};
+			MutableArraySequence<Number> seeds(seedsData, 2);
+			return std::make_unique<Lazy>(FibonacciRule, &seeds, ReadLength());
+		}
+		if (choice == 2) {
+			Number first = ReadValue<Number>("Первый элемент: ");
+			Number step = ReadValue<Number>("Шаг: ");
+			return CreateByIndexRule([first, step](std::size_t index) {
+				return first + step * static_cast<Number>(index);
+			});
+		}
+		if (choice == 3) {
+			Number first = ReadValue<Number>("Первый элемент: ");
+			Number ratio = ReadValue<Number>("Знаменатель прогрессии: ");
+			MutableArraySequence<Number> seeds(&first, 1);
+			auto rule = [ratio](Sequence<Number> *prefix) {
+				std::size_t length = prefix->GetLength();
+				return SequenceAt(prefix, length - 1) * ratio;
+			};
+			return std::make_unique<Lazy>(std::function<Number(Sequence<Number> *)>(rule), &seeds, ReadLength());
+		}
+		if (choice == 4) {
+			return CreateByIndexRule([](std::size_t index) {
+				Number n = static_cast<Number>(index + 1);
+				return n * n;
+			});
+		}
+		if (choice == 5) {
+			return CreateByIndexRule([](std::size_t index) {
+				Number n = static_cast<Number>(index + 1);
+				return n * n * n;
+			});
+		}
+		if (choice == 6) {
+			Number first = 1;
+			MutableArraySequence<Number> seeds(&first, 1);
+			auto rule = [](Sequence<Number> *prefix) {
+				std::size_t length = prefix->GetLength();
+				return SequenceAt(prefix, length - 1) * static_cast<Number>(length + 1);
+			};
+			return std::make_unique<Lazy>(std::function<Number(Sequence<Number> *)>(rule), &seeds, ReadLength());
+		}
+		if (choice == 7) {
+			Number a = ReadValue<Number>("a = ");
+			Number b = ReadValue<Number>("b = ");
+			return CreateByIndexRule([a, b](std::size_t index) {
+				return a * static_cast<Number>(index) + b;
+			});
+		}
+		if (choice == 8) {
+			return CreateByIndexRule([](std::size_t index) {
+				return static_cast<Number>(index + 1);
+			});
+		}
+		throw std::invalid_argument("Неизвестный генератор");
+	}
+
+	std::size_t PrefixCount(const Lazy &sequence) {
+		std::size_t requested = ReadValue<std::size_t>("Сколько элементов вывести: ");
+		Cardinal length = sequence.GetLength();
+		if (length.IsFinite() && requested > length.Value()) {
+			return length.Value();
+		}
+		return requested;
+	}
+
+	void PrintLazyPrefix(const Lazy &sequence, std::size_t count) {
+		std::cout << "Элементы: ";
+		for (std::size_t i = 0; i < count; ++i) {
+			if (i != 0) {
 				std::cout << ' ';
 			}
 			std::cout << sequence.Get(i);
 		}
-		std::cout << "\nДлина: " << FormatCardinal(sequence.GetLength());
-		std::cout << "\nМатериализовано элементов: " << sequence.GetMaterializedCount() << "\n";
+		std::cout << "\nДлина: " << FormatLength(sequence.GetLength());
+		std::cout << "\nМатериализовано: " << sequence.GetMaterializedCount() << "\n";
 	}
 
-	void PrintFiniteSequence(Sequence<int> *sequence) {
-		std::cout << "Значения: ";
-		auto *enumerator = sequence->GetEnumerator();
+	void PrintFiniteSequence(Sequence<Number> &sequence) {
+		std::unique_ptr<IEnumerator<Number> > enumerator(sequence.GetEnumerator());
+		std::cout << "Элементы: ";
 		bool first = true;
 		while (enumerator->MoveNext()) {
 			if (!first) {
@@ -124,348 +200,366 @@ namespace {
 			std::cout << enumerator->Current();
 			first = false;
 		}
-		delete enumerator;
-		std::cout << "\nДлина: " << sequence->GetLength() << "\n";
+		std::cout << "\nДлина: " << sequence.GetLength() << "\n";
 	}
 
-	void PrintGeneratorCacheCheck(LazySequence<long long> &sequence, std::size_t count) {
-		std::cout << "\nПроверка кэша: повторное обращение к уже вычисленному префиксу не увеличивает кэш.\n";
-		std::size_t before = sequence.GetMaterializedCount();
-		if (count > 0) {
-			sequence.Get(count - 1);
+	void MapCurrent(std::unique_ptr<Lazy> &sequence) {
+		std::cout << "1. Возвести в квадрат\n";
+		std::cout << "2. Умножить на число\n";
+		std::cout << "3. Применить a*x + b\n";
+		int choice = ReadValue<int>("Выбор: ");
+		if (choice == 1) {
+			sequence = sequence->Map<Number>([](Number x) { return x * x; });
+		} else if (choice == 2) {
+			Number multiplier = ReadValue<Number>("Множитель: ");
+			sequence = sequence->Map<Number>([multiplier](Number x) { return x * multiplier; });
+		} else if (choice == 3) {
+			Number a = ReadValue<Number>("a = ");
+			Number b = ReadValue<Number>("b = ");
+			sequence = sequence->Map<Number>([a, b](Number x) { return a * x + b; });
+		} else {
+			throw std::invalid_argument("Неизвестное преобразование");
 		}
-		std::size_t after = sequence.GetMaterializedCount();
-		std::cout << "До повторного обращения: " << before << "\n";
-		std::cout << "После повторного обращения: " << after << "\n";
 	}
 
-	void ManualLazySequenceTest() {
-		std::size_t count = ReadValue<std::size_t>("Количество элементов: ");
-		MutableArraySequence<int> source;
-		for (std::size_t i = 0; i < count; ++i) {
-			source.Append(ReadValue<int>("элемент[" + std::to_string(i) + "] = "));
+	void FilterCurrent(std::unique_ptr<Lazy> &sequence) {
+		std::cout << "1. Только чётные\n";
+		std::cout << "2. Только нечётные\n";
+		std::cout << "3. Больше указанного значения\n";
+		std::cout << "4. Кратные указанному числу\n";
+		int choice = ReadValue<int>("Выбор: ");
+		if (choice == 1) {
+			sequence = sequence->Where([](Number x) { return x % 2 == 0; });
+		} else if (choice == 2) {
+			sequence = sequence->Where([](Number x) { return x % 2 != 0; });
+		} else if (choice == 3) {
+			Number bound = ReadValue<Number>("Граница: ");
+			sequence = sequence->Where([bound](Number x) { return x > bound; });
+		} else if (choice == 4) {
+			Number divisor = ReadValue<Number>("Делитель: ");
+			if (divisor == 0) {
+				throw std::invalid_argument("Делитель не может быть нулём");
+			}
+			sequence = sequence->Where([divisor](Number x) { return x % divisor == 0; });
+		} else {
+			throw std::invalid_argument("Неизвестный фильтр");
 		}
+	}
 
-		LazySequence<int> lazy(&source);
-		std::cout << "\nСоздана конечная ленивая последовательность из данных, введённых с клавиатуры.\n";
-		std::cout << "Материализовано до обращения: " << lazy.GetMaterializedCount() << "\n";
-		PrintSequencePrefix(lazy, count);
+	void ReduceCurrent(const Lazy &sequence, bool firstN) {
+		std::cout << "1. Сумма\n";
+		std::cout << "2. Произведение\n";
+		std::cout << "3. Максимум\n";
+		int choice = ReadValue<int>("Выбор: ");
+		std::size_t count = firstN ? ReadValue<std::size_t>("Количество первых элементов: ") : 0;
+		Number initial = choice == 2 ? 1 : std::numeric_limits<Number>::lowest();
+		if (choice == 1) {
+			initial = 0;
+			auto reducer = std::function<Number(Number, Number)>([](Number acc, Number x) { return acc + x; });
+			Number result = firstN ? sequence.ReduceFirstN(count, initial, reducer) : sequence.Reduce(initial, reducer);
+			std::cout << "Сумма: " << result << "\n";
+		} else if (choice == 2) {
+			auto reducer = std::function<Number(Number, Number)>([](Number acc, Number x) { return acc * x; });
+			Number result = firstN ? sequence.ReduceFirstN(count, initial, reducer) : sequence.Reduce(initial, reducer);
+			std::cout << "Произведение: " << result << "\n";
+		} else if (choice == 3) {
+			auto reducer = std::function<Number(Number, Number)>([](Number acc, Number x) {
+				return acc > x ? acc : x;
+			});
+			Number result = firstN ? sequence.ReduceFirstN(count, initial, reducer) : sequence.Reduce(initial, reducer);
+			std::cout << "Максимум: " << result << "\n";
+		} else {
+			throw std::invalid_argument("Неизвестная свёртка");
+		}
+	}
 
+	void EnumerateCurrent(const Lazy &sequence) {
+		std::size_t count = ReadValue<std::size_t>("Сколько элементов перечислить: ");
+		auto enumerator = sequence.GetEnumerator();
+		std::cout << "Перечислитель: ";
+		for (std::size_t i = 0; i < count && enumerator->MoveNext(); ++i) {
+			std::cout << enumerator->Current() << ' ';
+		}
+		std::cout << "\nСброс перечислителя. Первый элемент после Reset: ";
+		enumerator->Reset();
+		if (enumerator->MoveNext()) {
+			std::cout << enumerator->Current() << "\n";
+		} else {
+			std::cout << "последовательность пуста\n";
+		}
+	}
+
+	void LazyWorkspace(std::unique_ptr<Lazy> sequence) {
 		while (true) {
-			std::cout << "\nРучные проверки ленивой последовательности\n";
-			std::cout << "1. Получить элемент по индексу\n";
-			std::cout << "2. Получить подпоследовательность\n";
-			std::cout << "3. Предпросмотр добавления и вставки\n";
-			std::cout << "0. Назад\n";
-			std::cout << "> ";
-
-			int choice = ReadValue<int>("");
+			std::cout << "\nОперации над текущей LazySequence\n";
+			std::cout << "1. Вывести префикс\n2. Показать длину и размер кэша\n3. GetFirst / GetLast\n";
+			std::cout << "4. Get по индексу\n5. Конечная подпоследовательность\n6. Бесконечный хвост\n";
+			std::cout << "7. Append\n8. Prepend\n9. InsertAt элемента\n10. RemoveAt\n11. RemoveRange\n";
+			std::cout << "12. Concat с введённой последовательностью\n13. Вставить введённую последовательность\n";
+			std::cout << "14. Map\n15. Where\n16. Reduce всей последовательности\n17. ReduceFirstN\n";
+			std::cout << "18. Take\n19. Обход через GetEnumerator\n0. Назад\n";
+			int choice = ReadValue<int>("Выбор: ");
 			if (choice == 0) {
 				return;
 			}
-
 			try {
 				if (choice == 1) {
-					std::size_t index = ReadValue<std::size_t>("индекс = ");
-					std::cout << "значение = " << lazy.Get(index) << "\n";
-					std::cout << "Материализовано сейчас: " << lazy.GetMaterializedCount() << "\n";
+					PrintLazyPrefix(*sequence, PrefixCount(*sequence));
 				} else if (choice == 2) {
-					std::size_t start = ReadValue<std::size_t>("начальный индекс = ");
-					std::size_t end = ReadValue<std::size_t>("конечный индекс = ");
-					auto subsequence = lazy.GetSubsequence(start, end);
-					PrintSequencePrefix(*subsequence, end - start + 1);
+					std::cout << "Длина: " << FormatLength(sequence->GetLength()) << "\n";
+					std::cout << "Материализовано: " << sequence->GetMaterializedCount() << "\n";
 				} else if (choice == 3) {
-					int value = ReadValue<int>("значение для операции = ");
-					std::size_t index = ReadValue<std::size_t>("индекс вставки = ");
-					auto changed = lazy.Prepend(value);
-					auto appended = changed->Append(value);
-					auto inserted = appended->InsertAt(value, index);
-					std::size_t previewCount = inserted->GetLength().IsFinite() ? inserted->GetLength().Value() : 10;
-					PrintSequencePrefix(*inserted, previewCount);
+					std::cout << "Первый элемент: " << sequence->GetFirst() << "\n";
+					std::cout << "Последний элемент: " << sequence->GetLast() << "\n";
+				} else if (choice == 4) {
+					std::size_t index = ReadValue<std::size_t>("Индекс: ");
+					std::cout << "Значение: " << sequence->Get(Cardinal::Finite(index)) << "\n";
+				} else if (choice == 5) {
+					std::size_t start = ReadValue<std::size_t>("Начальный индекс: ");
+					std::size_t end = ReadValue<std::size_t>("Конечный индекс: ");
+					sequence = sequence->GetSubsequence(Cardinal::Finite(start), Cardinal::Finite(end));
+					std::cout << "Подпоследовательность стала текущей.\n";
+				} else if (choice == 6) {
+					std::size_t start = ReadValue<std::size_t>("Начальный индекс хвоста: ");
+					sequence = sequence->GetSubsequence(Cardinal::Finite(start), Cardinal::Omega());
+					std::cout << "Бесконечный хвост стал текущей последовательностью.\n";
+				} else if (choice == 7) {
+					sequence = sequence->Append(ReadValue<Number>("Значение: "));
+				} else if (choice == 8) {
+					sequence = sequence->Prepend(ReadValue<Number>("Значение: "));
+				} else if (choice == 9) {
+					Number item = ReadValue<Number>("Значение: ");
+					std::size_t index = ReadValue<std::size_t>("Индекс: ");
+					sequence = sequence->InsertAt(item, index);
+				} else if (choice == 10) {
+					sequence = sequence->RemoveAt(ReadValue<std::size_t>("Индекс: "));
+				} else if (choice == 11) {
+					std::size_t start = ReadValue<std::size_t>("Начальный индекс: ");
+					std::size_t count = ReadValue<std::size_t>("Количество удаляемых элементов: ");
+					sequence = sequence->RemoveRange(start, count);
+				} else if (choice == 12) {
+					auto second = CreateFiniteLazy();
+					sequence = sequence->Concat(*second);
+				} else if (choice == 13) {
+					MutableArraySequence<Number> inserted = ReadItems();
+					std::size_t index = ReadValue<std::size_t>("Индекс вставки: ");
+					sequence = sequence->InsertAt(static_cast<const Sequence<Number> &>(inserted), index);
+				} else if (choice == 14) {
+					MapCurrent(sequence);
+				} else if (choice == 15) {
+					FilterCurrent(sequence);
+				} else if (choice == 16) {
+					ReduceCurrent(*sequence, false);
+				} else if (choice == 17) {
+					ReduceCurrent(*sequence, true);
+				} else if (choice == 18) {
+					auto result = sequence->Take(ReadValue<std::size_t>("Количество элементов: "));
+					PrintFiniteSequence(*result);
+				} else if (choice == 19) {
+					EnumerateCurrent(*sequence);
 				} else {
-					std::cout << "Неизвестный пункт меню\n";
+					std::cout << "Неизвестная команда.\n";
 				}
 			} catch (const std::exception &error) {
-				std::cout << "Проверка завершилась ошибкой: " << error.what() << "\n";
+				std::cout << "Ошибка операции: " << error.what() << "\n";
 			}
 		}
 	}
 
-	void ManualRecurrenceTest() {
-		std::cout << "\nГенераторы ленивых последовательностей\n";
-		std::cout << "1. Числа Фибоначчи\n";
-		std::cout << "2. Арифметическая прогрессия\n";
-		std::cout << "3. Геометрическая прогрессия\n";
-		std::cout << "4. Квадраты натуральных чисел\n";
-		std::cout << "5. Кубы натуральных чисел\n";
-		std::cout << "6. Факториалы\n";
-		std::cout << "7. Линейная формула a*n + b\n";
-		std::cout << "0. Назад\n";
-		std::cout << "> ";
-
-		int generatorChoice = ReadValue<int>("");
-		if (generatorChoice == 0) {
-			return;
-		}
-
-		std::size_t count = ReadValue<std::size_t>("Сколько элементов вывести? ");
-
-		if (generatorChoice == 1) {
-			long long seedItems[] = {0, 1};
-			MutableArraySequence<long long> seeds(seedItems, 2);
-			LazySequence<long long> sequence(FibonacciRule, &seeds);
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else if (generatorChoice == 2) {
-			long long first = ReadValue<long long>("первый элемент = ");
-			long long step = ReadValue<long long>("шаг = ");
-			LazySequence<long long> sequence(
-				std::function<long long(std::size_t)>(
-					[first, step](std::size_t index) { return first + step * static_cast<long long>(index); }),
-				Cardinal::Omega());
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else if (generatorChoice == 3) {
-			long long first = ReadValue<long long>("первый элемент = ");
-			long long ratio = ReadValue<long long>("знаменатель прогрессии = ");
-			MutableArraySequence<long long> seeds(&first, 1);
-			LazySequence<long long> sequence(
-				std::function<long long(Sequence<long long> *)>(
-					[ratio](Sequence<long long> *generated) {
-						std::size_t length = generated->GetLength();
-						return GetAt(generated, length - 1) * ratio;
-					}),
-				&seeds);
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else if (generatorChoice == 4) {
-			LazySequence<long long> sequence(
-				std::function<long long(std::size_t)>([](std::size_t index) {
-					long long n = static_cast<long long>(index + 1);
-					return n * n;
-				}),
-				Cardinal::Omega());
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else if (generatorChoice == 5) {
-			LazySequence<long long> sequence(
-				std::function<long long(std::size_t)>([](std::size_t index) {
-					long long n = static_cast<long long>(index + 1);
-					return n * n * n;
-				}),
-				Cardinal::Omega());
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else if (generatorChoice == 6) {
-			long long first = 1;
-			MutableArraySequence<long long> seeds(&first, 1);
-			LazySequence<long long> sequence(
-				std::function<long long(Sequence<long long> *)>([](Sequence<long long> *generated) {
-					std::size_t length = generated->GetLength();
-					return GetAt(generated, length - 1) * static_cast<long long>(length + 1);
-				}),
-				&seeds);
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else if (generatorChoice == 7) {
-			long long a = ReadValue<long long>("a = ");
-			long long b = ReadValue<long long>("b = ");
-			LazySequence<long long> sequence(
-				std::function<long long(std::size_t)>(
-					[a, b](std::size_t index) { return a * static_cast<long long>(index) + b; }),
-				Cardinal::Omega());
-			PrintSequencePrefix(sequence, count);
-			PrintGeneratorCacheCheck(sequence, count);
-		} else {
-			std::cout << "Неизвестный пункт меню\n";
-		}
+	void PrintReadStreamStatus(ReadOnlyStream<Number> &stream) {
+		std::cout << "Позиция: " << stream.GetPosition();
+		std::cout << ", конец потока: " << (stream.IsEndOfStream() ? "да" : "нет");
+		std::cout << ", поддерживает Seek: " << (stream.IsCanSeek() ? "да" : "нет");
+		std::cout << ", поддерживает возврат: " << (stream.IsCanGoBack() ? "да" : "нет") << "\n";
 	}
 
-	void ManualStreamTest() {
-		std::string text = ReadTextLine("Введите целые числа через пробел: ");
-		StringReadStream<int> stream(text, DeserializeInt);
-		stream.Open();
-
-		std::cout << "Чтение потока:\n";
-		long long sum = 0;
+	template<class Stream>
+	void ReadStreamCommands(Stream &stream) {
 		while (true) {
+			std::cout << "\n1. Open\n2. Read\n3. Seek\n4. Состояние\n5. Close\n0. Назад\n";
+			int choice = ReadValue<int>("Выбор: ");
+			if (choice == 0) {
+				return;
+			}
 			try {
-				int value = stream.Read();
-				sum += value;
-				std::cout << "позиция=" << stream.GetPosition() << ", значение=" << value << "\n";
-			} catch (const EndOfStream &) {
-				break;
+				if (choice == 1) {
+					stream.Open();
+					std::cout << "Поток открыт.\n";
+				} else if (choice == 2) {
+					std::cout << "Прочитано: " << stream.Read() << "\n";
+				} else if (choice == 3) {
+					std::cout << "Новая позиция: " << stream.Seek(ReadValue<std::size_t>("Позиция: ")) << "\n";
+				} else if (choice == 4) {
+					PrintReadStreamStatus(stream);
+				} else if (choice == 5) {
+					stream.Close();
+					std::cout << "Поток закрыт.\n";
+				}
+			} catch (const std::exception &error) {
+				std::cout << "Ошибка потока: " << error.what() << "\n";
 			}
 		}
-
-		std::cout << "Достигнут конец потока. Сумма = " << sum << "\n";
-		stream.Close();
 	}
 
-	void SequenceWriteStreamTest() {
-		std::size_t count = ReadValue<std::size_t>("Сколько значений записать в поток последовательности? ");
-		MutableArraySequence<int> destination;
-		SequenceWriteStream<int> stream(destination);
-		stream.Open();
+	void SequenceReadPanel() {
+		MutableArraySequence<Number> source = ReadItems();
+		SequenceReadStream<Number> stream(source);
+		ReadStreamCommands(stream);
+	}
 
-		for (std::size_t i = 0; i < count; ++i) {
-			int value = ReadValue<int>("значение[" + std::to_string(i) + "] = ");
-			std::cout << "следующая позиция = " << stream.Write(value) << "\n";
+	void LazyReadPanel() {
+		std::cout << "1. Ввести конечную последовательность\n2. Создать через генератор\n";
+		int choice = ReadValue<int>("Выбор: ");
+		auto source = choice == 1 ? CreateFiniteLazy() : CreateGeneratedLazy();
+		LazySequenceReadStream<Number> stream(*source);
+		while (true) {
+			std::cout << "\nПоток чтения LazySequence\n";
+			std::cout << "1. Open\n2. Read\n3. Seek\n4. Состояние и кэш\n5. Close\n0. Назад\n";
+			int command = ReadValue<int>("Выбор: ");
+			if (command == 0) {
+				return;
+			}
+			try {
+				if (command == 1) {
+					stream.Open();
+				} else if (command == 2) {
+					std::cout << "Прочитано: " << stream.Read() << "\n";
+				} else if (command == 3) {
+					std::cout << "Новая позиция: " << stream.Seek(ReadValue<std::size_t>("Позиция: ")) << "\n";
+				} else if (command == 4) {
+					PrintReadStreamStatus(stream);
+					std::cout << "Материализовано в источнике: " << source->GetMaterializedCount() << "\n";
+				} else if (command == 5) {
+					stream.Close();
+				}
+			} catch (const std::exception &error) {
+				std::cout << "Ошибка потока: " << error.what() << "\n";
+			}
 		}
-		stream.Close();
-
-		std::cout << "Последовательность после записи:\n";
-		PrintFiniteSequence(&destination);
 	}
 
-	void RunNamedUiTest(const std::string &name, void (*test)(), int &passed, int &failed) {
-		try {
-			test();
-			++passed;
-			std::cout << "[ОК] " << name << "\n";
-		} catch (const std::exception &error) {
-			++failed;
-			std::cout << "[ОШИБКА] " << name << ": " << error.what() << "\n";
+	void StringReadPanel() {
+		std::string text = ReadLine("Введите целые числа через пробел: ");
+		StringReadStream<Number> stream(text, [](const std::string &token) { return std::stoll(token); });
+		ReadStreamCommands(stream);
+	}
+
+	void SequenceWritePanel() {
+		MutableArraySequence<Number> destination;
+		SequenceWriteStream<Number> stream(destination);
+		while (true) {
+			std::cout << "\nПоток записи в последовательность\n";
+			std::cout << "1. Open\n2. Write\n3. Показать результат и позицию\n4. Close\n0. Назад\n";
+			int choice = ReadValue<int>("Выбор: ");
+			if (choice == 0) {
+				return;
+			}
+			try {
+				if (choice == 1) {
+					stream.Open();
+				} else if (choice == 2) {
+					std::cout << "Новая позиция: " << stream.Write(ReadValue<Number>("Значение: ")) << "\n";
+				} else if (choice == 3) {
+					PrintFiniteSequence(destination);
+					std::cout << "Позиция записи: " << stream.GetPosition() << "\n";
+				} else if (choice == 4) {
+					stream.Close();
+				}
+			} catch (const std::exception &error) {
+				std::cout << "Ошибка потока: " << error.what() << "\n";
+			}
 		}
 	}
 
-	void AutoTestLazyMaterialization() {
-		int items[] = {10, 20, 30};
-		LazySequence<int> lazy(items, 3);
-		RequireEqual(lazy.GetMaterializedCount(), static_cast<std::size_t>(0),
-		             "кэш должен быть пустым до первого обращения");
-		RequireEqual(lazy.Get(1), 20, "Get(1)");
-		RequireEqual(lazy.GetMaterializedCount(), static_cast<std::size_t>(2),
-		             "после Get(1) в кэше должны быть первые два элемента");
-		RequireEqual(lazy.GetLast(), 30, "GetLast()");
-               RequireThrows<std::out_of_range>([&lazy]() { lazy.Get(3); }, "выход за границы Get");
+	void FileStreamsPanel() {
+		std::string filename = ReadLine("Имя файла: ");
+		bool appendMode = ReadValue<int>("Запись в конец файла? (1 - да, 0 - нет): ") != 0;
+		FileWriteStream<Number> writer(filename, [](const Number &value) { return std::to_string(value); }, appendMode);
+		FileReadStream<Number> reader(filename, [](const std::string &line) { return std::stoll(line); });
+		while (true) {
+			std::cout << "\nФайловые потоки\n";
+			std::cout << "1. Открыть запись\n2. Записать число\n3. Позиция записи\n4. Закрыть запись\n";
+			std::cout << "5. Открыть чтение\n6. Прочитать число\n7. Seek чтения\n8. Состояние чтения\n9. Закрыть чтение\n";
+			std::cout << "0. Назад\n";
+			int choice = ReadValue<int>("Выбор: ");
+			if (choice == 0) {
+				return;
+			}
+			try {
+				if (choice == 1) {
+					writer.Open();
+				} else if (choice == 2) {
+					std::cout << "Новая позиция: " << writer.Write(ReadValue<Number>("Значение: ")) << "\n";
+				} else if (choice == 3) {
+					std::cout << "Позиция записи: " << writer.GetPosition() << "\n";
+				} else if (choice == 4) {
+					writer.Close();
+				} else if (choice == 5) {
+					reader.Open();
+				} else if (choice == 6) {
+					std::cout << "Прочитано: " << reader.Read() << "\n";
+				} else if (choice == 7) {
+					std::cout << "Новая позиция: " << reader.Seek(ReadValue<std::size_t>("Позиция: ")) << "\n";
+				} else if (choice == 8) {
+					PrintReadStreamStatus(reader);
+				} else if (choice == 9) {
+					reader.Close();
+				}
+			} catch (const std::exception &error) {
+				std::cout << "Ошибка файлового потока: " << error.what() << "\n";
+			}
+		}
 	}
 
-	void AutoTestLazyOperations() {
-		int items[] = {2, 3};
-		LazySequence<int> base(items, 2);
-
-		auto changed = base.Prepend(1);
-		auto appended = changed->Append(4);
-		auto inserted = appended->InsertAt(99, 2);
-		auto removed = inserted->RemoveAt(2);
-
-		RequireEqual(removed->GetLength(), Cardinal::Finite(4), "длина после операций");
-		RequireEqual(removed->Get(0), 1, "первый элемент");
-		RequireEqual(removed->Get(1), 2, "второй элемент");
-		RequireEqual(removed->Get(2), 3, "третий элемент");
-		RequireEqual(removed->Get(3), 4, "четвёртый элемент");
-	}
-
-	void AutoTestMapWhereReduce() {
-		LazySequence<int> finite([](std::size_t index) { return static_cast<int>(index + 1); }, Cardinal::Finite(10));
-
-		auto squares = finite.Map<int>(std::function<int(int)>([](int value) { return value * value; }));
-		RequireEqual(squares->Get(4), 25, "отображение: квадрат");
-
-		auto evens = finite.Where(std::function<bool(int)>([](int value) { return value % 2 == 0; }));
-		RequireEqual(evens->GetLength(), Cardinal::Finite(5), "фильтрация: длина");
-		RequireEqual(evens->Get(0), 2, "фильтрация: первый элемент");
-		RequireEqual(evens->Get(4), 10, "фильтрация: последний элемент");
-
-		int sum = finite.Reduce<int>(0, std::function<int(int, int)>([](int acc, int value) { return acc + value; }));
-		RequireEqual(sum, 55, "свёртка: сумма");
-	}
-
-	void AutoTestStreams() {
-		MutableArraySequence<int> sequence;
-		sequence.Append(7)->Append(8)->Append(9);
-
-		SequenceReadStream<int> sequenceStream(sequence);
-		RequireThrows<StreamException>([&sequenceStream]() { sequenceStream.Read(); }, "чтение до Open");
-		sequenceStream.Open();
-		RequireEqual(sequenceStream.Read(), 7, "первое значение SequenceReadStream");
-		RequireEqual(sequenceStream.Seek(2), static_cast<std::size_t>(2), "Seek в SequenceReadStream");
-		RequireEqual(sequenceStream.Read(), 9, "чтение после Seek");
-		sequenceStream.Close();
-
-		StringReadStream<int> stringStream("1 2 3 4", DeserializeInt);
-		stringStream.Open();
-		RequireEqual(stringStream.Read(), 1, "первое значение StringReadStream");
-		RequireEqual(stringStream.Seek(3), static_cast<std::size_t>(3), "Seek в StringReadStream");
-		RequireEqual(stringStream.Read(), 4, "чтение после Seek в StringReadStream");
-		stringStream.Close();
-	}
-
-	void AutoTestFileStreams() {
-		const char *filename = "ui_stream_test.tmp";
-
-		FileWriteStream<int> writer(filename, SerializeInt);
-		writer.Open();
-		writer.Write(21);
-		writer.Write(34);
-		writer.Close();
-
-		FileReadStream<int> reader(filename, DeserializeInt);
-		reader.Open();
-		RequireEqual(reader.Read(), 21, "первое значение из файла");
-		RequireEqual(reader.Read(), 34, "второе значение из файла");
-		RequireThrows<EndOfStream>([&reader]() { reader.Read(); }, "конец файлового потока");
-		reader.Close();
-
-		std::remove(filename);
-	}
-
-	void RunAutomaticUiTests() {
-		int passed = 0;
-		int failed = 0;
-
-		RunNamedUiTest("Материализация ленивой последовательности", AutoTestLazyMaterialization, passed, failed);
-		RunNamedUiTest("Операции ленивой последовательности", AutoTestLazyOperations, passed, failed);
-		RunNamedUiTest("Отображение, фильтрация, свёртка", AutoTestMapWhereReduce, passed, failed);
-		RunNamedUiTest("Потоки", AutoTestStreams, passed, failed);
-		RunNamedUiTest("Файловые потоки", AutoTestFileStreams, passed, failed);
-
-		std::cout << "\nИтог автоматических проверок: успешно=" << passed << ", ошибок=" << failed << "\n";
-	}
-
-	void RunLoadTest() {
-		std::size_t count = ReadValue<std::size_t>("Сколько элементов обработать? ");
-		auto naturals = LazySequence<int>::Infinite([](std::size_t index) { return static_cast<int>(index + 1); });
-		LazySequenceReadStream<int> stream(*naturals);
+	void RunAutomaticChecks() {
+		int items[] = {1, 2, 3};
+		LazySequence<int> sequence(items, 3);
+		if (sequence.Get(1) != 2 || sequence.GetMaterializedCount() != 2) {
+			throw std::runtime_error("Не пройдена проверка материализации");
+		}
+		auto changed = sequence.Prepend(0)->Append(4);
+		if (changed->GetFirst() != 0 || changed->GetLast() != 4) {
+			throw std::runtime_error("Не пройдена проверка операций");
+		}
+		StringReadStream<int> stream("7 8", DeserializeInt);
 		stream.Open();
+		if (stream.Read() != 7 || stream.Read() != 8) {
+			throw std::runtime_error("Не пройдена проверка потоков");
+		}
+		std::cout << "Встроенные проверки UI успешно выполнены. Полный набор запускается через GoogleTest.\n";
+	}
 
-		long long sum = 0;
+	void RunLazyLoadTest() {
+		std::size_t count = ReadValue<std::size_t>("Сколько натуральных чисел обработать: ");
+		auto sequence = Lazy::Infinite([](std::size_t index) { return static_cast<Number>(index + 1); });
+		LazySequenceReadStream<Number> stream(*sequence);
+		stream.Open();
+		Number sum = 0;
 		auto start = std::chrono::steady_clock::now();
 		for (std::size_t i = 0; i < count; ++i) {
 			sum += stream.Read();
 		}
 		auto finish = std::chrono::steady_clock::now();
 		stream.Close();
-
-		auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count();
-		std::cout << "Обработано элементов: " << count << "\n";
+		auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count();
 		std::cout << "Сумма: " << sum << "\n";
-		std::cout << "Материализовано элементов ленивой последовательности: " << naturals->GetMaterializedCount()
-				<< "\n";
-		std::cout << "Время: " << elapsedMs << " мс\n";
+		std::cout << "Материализовано: " << sequence->GetMaterializedCount() << "\n";
+		std::cout << "Время: " << milliseconds << " мс\n";
 	}
 
 	void RunFileLoadTest() {
-		std::size_t count = ReadValue<std::size_t>("Сколько чисел записать во временный файл? ");
+		std::size_t count = ReadValue<std::size_t>("Сколько чисел записать и прочитать: ");
 		const std::string filename = "ui_file_stream_load_test.tmp";
-
-		auto serializeLongLong = [](const long long &value) { return std::to_string(value); };
-		auto deserializeLongLong = [](const std::string &text) { return std::stoll(text); };
-
-		auto writeStart = std::chrono::steady_clock::now();
-		FileWriteStream<long long> writer(filename, serializeLongLong);
+		FileWriteStream<Number> writer(filename, [](const Number &value) { return std::to_string(value); });
+		auto start = std::chrono::steady_clock::now();
 		writer.Open();
 		for (std::size_t i = 0; i < count; ++i) {
-			writer.Write(static_cast<long long>(i + 1));
+			writer.Write(static_cast<Number>(i + 1));
 		}
 		writer.Close();
-		auto writeFinish = std::chrono::steady_clock::now();
-
-		long long sum = 0;
-		FileReadStream<long long> reader(filename, deserializeLongLong);
-		auto readStart = std::chrono::steady_clock::now();
+		FileReadStream<Number> reader(filename, [](const std::string &value) { return std::stoll(value); });
 		reader.Open();
+		Number sum = 0;
 		while (true) {
 			try {
 				sum += reader.Read();
@@ -474,59 +568,58 @@ namespace {
 			}
 		}
 		reader.Close();
-		auto readFinish = std::chrono::steady_clock::now();
-
+		auto finish = std::chrono::steady_clock::now();
 		std::remove(filename.c_str());
-
-		long long expected = static_cast<long long>(count) * static_cast<long long>(count + 1) / 2;
-		auto writeMs = std::chrono::duration_cast<std::chrono::milliseconds>(writeFinish - writeStart).count();
-		auto readMs = std::chrono::duration_cast<std::chrono::milliseconds>(readFinish - readStart).count();
-
-		std::cout << "Записано чисел: " << count << "\n";
-		std::cout << "Сумма при чтении: " << sum << "\n";
-		std::cout << "Ожидаемая сумма: " << expected << "\n";
-		std::cout << "Время записи: " << writeMs << " мс\n";
-		std::cout << "Время чтения: " << readMs << " мс\n";
+		auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(finish - start).count();
+		std::cout << "Сумма прочитанных значений: " << sum << "\n";
+		std::cout << "Время записи и чтения: " << milliseconds << " мс\n";
 	}
 
 	void PrintMainMenu() {
-		std::cout << "\nИнтерфейс тестирования лабораторной работы №4\n";
-		std::cout << "1. Ручная проверка ленивой последовательности\n";
-		std::cout << "2. Ручная проверка генераторов ленивых последовательностей\n";
-		std::cout << "3. Ручная проверка потока чтения из строки\n";
-		std::cout << "4. Ручная проверка потока записи в последовательность\n";
-		std::cout << "5. Запустить автоматические проверки\n";
-		std::cout << "6. Нагрузочная проверка бесконечной ленивой последовательности через поток\n";
-		std::cout << "7. Нагрузочная проверка файлового потока\n";
+		std::cout << "\nИнтерфейс лабораторной работы N4\n";
+		std::cout << "1. Конечная LazySequence\n";
+		std::cout << "2. LazySequence через генератор\n";
+		std::cout << "3. Поток чтения обычной последовательности\n";
+		std::cout << "4. Поток чтения LazySequence\n";
+		std::cout << "5. Поток чтения строки\n";
+		std::cout << "6. Поток записи в последовательность\n";
+		std::cout << "7. Файловые потоки\n";
+		std::cout << "8. Встроенные автоматические проверки\n";
+		std::cout << "9. Нагрузочная проверка LazySequence\n";
+		std::cout << "10. Нагрузочная проверка файловых потоков\n";
 		std::cout << "0. Выход\n";
-		std::cout << "> ";
 	}
-} // namespace
+}
 
 void RunTestingUi() {
 	while (true) {
 		PrintMainMenu();
-		int choice = ReadValue<int>("");
-
+		int choice = ReadValue<int>("Выбор: ");
 		try {
 			if (choice == 1) {
-				ManualLazySequenceTest();
+				LazyWorkspace(CreateFiniteLazy());
 			} else if (choice == 2) {
-				ManualRecurrenceTest();
+				LazyWorkspace(CreateGeneratedLazy());
 			} else if (choice == 3) {
-				ManualStreamTest();
+				SequenceReadPanel();
 			} else if (choice == 4) {
-				SequenceWriteStreamTest();
+				LazyReadPanel();
 			} else if (choice == 5) {
-				RunAutomaticUiTests();
+				StringReadPanel();
 			} else if (choice == 6) {
-				RunLoadTest();
+				SequenceWritePanel();
 			} else if (choice == 7) {
+				FileStreamsPanel();
+			} else if (choice == 8) {
+				RunAutomaticChecks();
+			} else if (choice == 9) {
+				RunLazyLoadTest();
+			} else if (choice == 10) {
 				RunFileLoadTest();
 			} else if (choice == 0) {
 				return;
 			} else {
-				std::cout << "Неизвестный пункт меню\n";
+				std::cout << "Неизвестный пункт меню.\n";
 			}
 		} catch (const std::exception &error) {
 			std::cout << "Ошибка: " << error.what() << "\n";
