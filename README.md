@@ -13,12 +13,12 @@
 
 ## Возможности
 
-### Cardinal
+### Ordinal
 
-Класс `Cardinal` представляет длину последовательности:
+Класс `Ordinal` представляет длину последовательности:
 
-- `Cardinal::Finite(n)` - конечная длина;
-- `Cardinal::Omega()` - бесконечная длина;
+- `Ordinal::Finite(n)` - конечная длина;
+- `Ordinal::Omega()` - бесконечная длина;
 - сравнение конечных значений и `Omega`;
 - проверка наличия индекса через `ContainsIndex`;
 - сложение длин с учётом бесконечности.
@@ -199,7 +199,7 @@ fourthlab/
 |   |-- cpp/
 |   |   `-- UI.cpp
 |   `-- headers/
-|       |-- Cardinal.h
+|       |-- Ordinal.h
 |       |-- ForecastCorrection.h
 |       |-- LazySequence.h
 |       |-- Streams.h
@@ -211,7 +211,7 @@ fourthlab/
 
 Ключевые файлы:
 
-- `classes/headers/Cardinal.h` - конечные и бесконечные длины;
+- `classes/headers/Ordinal.h` - конечные и бесконечные длины;
 - `classes/headers/ForecastCorrection.h` - реализация варианта 3.3;
 - `classes/headers/LazySequence.h` - ленивая последовательность и её
   внутренние генераторы;
@@ -223,7 +223,7 @@ fourthlab/
 
 Тесты написаны на GoogleTest и покрывают:
 
-- операции `Cardinal`, включая `Omega` и переполнение;
+- операции `Ordinal`, включая `Omega` и переполнение;
 - ленивую материализацию и кэш;
 - пустые, конечные и бесконечные `LazySequence`;
 - подпоследовательности и проверку границ;

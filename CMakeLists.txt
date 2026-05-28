@@ -9,7 +9,7 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(FOURTHLAB_HEADERS
         classes/headers/ArraySequence.h
-        classes/headers/Cardinal.h
+        classes/headers/Ordinal.h
         classes/headers/DynamicArray.h
         classes/headers/ForecastCorrection.h
         classes/headers/IEnumerator.h

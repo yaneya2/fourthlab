@@ -1,4 +1,4 @@
-﻿#include <cstdio>
+#include <cstdio>
 #include <cstddef>
 #include <functional>
 #include <limits>
@@ -36,41 +36,62 @@ int FibonacciRule(Sequence<int>* generated) {
     return SequenceAt(generated, length - 1) + SequenceAt(generated, length - 2);
 }
 
-TEST(Cardinal, FiniteAndOmegaBehaveAsOrderedCardinals) {
-    Cardinal zero;
-    Cardinal three = Cardinal::Finite(3);
-    Cardinal five = Cardinal::Finite(5);
-    Cardinal omega = Cardinal::Omega();
+TEST(Ordinal, FiniteAndOmegaBehaveAsOrderedOrdinals) {
+    Ordinal zero;
+    Ordinal three = Ordinal::Finite(3);
+    Ordinal five = Ordinal::Finite(5);
+    Ordinal omega = Ordinal::Omega();
 
     EXPECT_TRUE(zero.IsFinite());
-    EXPECT_EQ(zero.Value(), static_cast<std::size_t>(0));
+    EXPECT_EQ(zero.FinitePart(), static_cast<std::size_t>(0));
     EXPECT_TRUE(omega.IsOmega());
-    EXPECT_THROW(omega.Value(), std::logic_error);
+    EXPECT_TRUE(omega.IsInfinite());
+    EXPECT_EQ(omega.FinitePart(), static_cast<std::size_t>(0));
 
     EXPECT_TRUE(three.ContainsIndex(2));
     EXPECT_FALSE(three.ContainsIndex(3));
     EXPECT_TRUE(omega.ContainsIndex(std::numeric_limits<std::size_t>::max()));
 
-    EXPECT_EQ(three + Cardinal::Finite(2), five);
-    EXPECT_TRUE((three + omega).IsOmega());
+    EXPECT_EQ(three + Ordinal::Finite(2), five);
+    EXPECT_TRUE((three + omega).IsInfinite());
     EXPECT_TRUE(three < omega);
     EXPECT_TRUE(omega > five);
-    EXPECT_TRUE(three <= Cardinal::Finite(3));
+    EXPECT_TRUE(three <= Ordinal::Finite(3));
     EXPECT_TRUE(five >= three);
     EXPECT_NE(three, five);
 }
 
-TEST(Cardinal, FiniteAdditionChecksOverflow) {
-    Cardinal almostMax = Cardinal::Finite(std::numeric_limits<std::size_t>::max());
+TEST(Ordinal, FiniteAdditionChecksOverflow) {
+    Ordinal almostMax = Ordinal::Finite(std::numeric_limits<std::size_t>::max());
 
-    EXPECT_THROW(almostMax + Cardinal::Finite(1), std::overflow_error);
+    EXPECT_THROW(almostMax + Ordinal::Finite(1), std::overflow_error);
+}
+
+TEST(Ordinal, RepresentsOmegaCoefficientAndFinitePart) {
+    Ordinal omega = Ordinal::Omega();
+    Ordinal omegaTwicePlusThree = Ordinal::FromParts(2, 3);
+    Ordinal omegaPlusFive = Ordinal::FromParts(1, 5);
+
+    EXPECT_EQ(omegaTwicePlusThree.OmegaCoefficient(), static_cast<std::size_t>(2));
+    EXPECT_EQ(omegaTwicePlusThree.FinitePart(), static_cast<std::size_t>(3));
+    EXPECT_FALSE(omegaTwicePlusThree.IsOmega());
+    EXPECT_TRUE(omegaTwicePlusThree.IsInfinite());
+    EXPECT_EQ(Ordinal::Finite(7).ToString(), "7");
+    EXPECT_EQ(omega.ToString(), "omega");
+    EXPECT_EQ(omegaTwicePlusThree.ToString(), "omega * 2 + 3");
+
+    EXPECT_GT(omegaTwicePlusThree, Ordinal::FromParts(1, 100));
+    EXPECT_GT(omegaPlusFive, omega);
+    EXPECT_EQ(Ordinal::Finite(5) + omega, omega);
+    EXPECT_EQ(omega + Ordinal::Finite(5), omegaPlusFive);
+    EXPECT_EQ(Ordinal::FromParts(2, 7) + Ordinal::FromParts(3, 4), Ordinal::FromParts(5, 4));
 }
 
 TEST(LazySequence, ArrayMaterializationIsLazy) {
     int items[] = {10, 20, 30};
     LazySequence<int> sequence(items, 3);
 
-    EXPECT_EQ(sequence.GetLength(), Cardinal::Finite(3));
+    EXPECT_EQ(sequence.GetLength(), Ordinal::Finite(3));
     EXPECT_EQ(sequence.GetMaterializedCount(), static_cast<std::size_t>(0));
     EXPECT_EQ(sequence.Get(1), 20);
     EXPECT_EQ(sequence.GetMaterializedCount(), static_cast<std::size_t>(2));
@@ -81,7 +102,7 @@ TEST(LazySequence, ArrayMaterializationIsLazy) {
 TEST(LazySequence, EmptySequenceRejectsElementAccess) {
     LazySequence<int> empty;
 
-    EXPECT_EQ(empty.GetLength(), Cardinal::Finite(0));
+    EXPECT_EQ(empty.GetLength(), Ordinal::Finite(0));
     EXPECT_EQ(empty.GetMaterializedCount(), static_cast<std::size_t>(0));
     EXPECT_THROW(empty.GetFirst(), std::out_of_range);
     EXPECT_THROW(empty.GetLast(), std::out_of_range);
@@ -97,21 +118,18 @@ TEST(LazySequence, BasicOperationsRemainLazy) {
     EXPECT_EQ(prepended->Get(2), 3);
 
     auto appended = prepended->Append(4);
-    EXPECT_EQ(appended->GetLength(), Cardinal::Finite(4));
+    EXPECT_EQ(appended->GetLength(), Ordinal::Finite(4));
     EXPECT_EQ(appended->Get(3), 4);
 
     auto inserted = appended->InsertAt(99, 2);
     EXPECT_EQ(inserted->Get(2), 99);
     EXPECT_EQ(inserted->Get(3), 3);
 
-    auto removed = inserted->RemoveAt(2);
-    EXPECT_EQ(removed->Get(2), 3);
-
     int otherItems[] = {5, 6};
     LazySequence<int> other(otherItems, 2);
-    auto concatenated = removed->Concat(other);
-    EXPECT_EQ(concatenated->GetLength(), Cardinal::Finite(6));
-    EXPECT_EQ(concatenated->Get(4), 5);
+    auto concatenated = inserted->Concat(other);
+    EXPECT_EQ(concatenated->GetLength(), Ordinal::Finite(7));
+    EXPECT_EQ(concatenated->Get(5), 5);
 }
 
 TEST(LazySequence, InsertAtEndIsRejectedBySpecification) {
@@ -125,52 +143,46 @@ TEST(LazySequence, SubsequenceChecksFiniteAndInfiniteBounds) {
     int items[] = {10, 20, 30, 40, 50};
     LazySequence<int> finite(items, 5);
 
-    auto middle = finite.GetSubsequence(Cardinal::Finite(1), Cardinal::Finite(3));
-    ASSERT_EQ(middle->GetLength(), Cardinal::Finite(3));
+    auto middle = finite.GetSubsequence(Ordinal::Finite(1), Ordinal::Finite(3));
+    ASSERT_EQ(middle->GetLength(), Ordinal::Finite(3));
     EXPECT_EQ(middle->Get(0), 20);
     EXPECT_EQ(middle->Get(2), 40);
 
-    EXPECT_THROW(finite.GetSubsequence(Cardinal::Finite(3), Cardinal::Finite(1)), std::out_of_range);
-    EXPECT_THROW(finite.GetSubsequence(Cardinal::Finite(0), Cardinal::Finite(5)), std::out_of_range);
-    EXPECT_THROW(finite.GetSubsequence(Cardinal::Omega(), Cardinal::Finite(3)), std::logic_error);
-    EXPECT_THROW(finite.GetSubsequence(Cardinal::Finite(1), Cardinal::Omega()), std::out_of_range);
+    EXPECT_THROW(finite.GetSubsequence(Ordinal::Finite(3), Ordinal::Finite(1)), std::out_of_range);
+    EXPECT_THROW(finite.GetSubsequence(Ordinal::Finite(0), Ordinal::Finite(5)), std::out_of_range);
+    EXPECT_THROW(finite.GetSubsequence(Ordinal::Omega(), Ordinal::Finite(3)), std::out_of_range);
+    EXPECT_THROW(finite.GetSubsequence(Ordinal::Finite(1), Ordinal::Omega()), std::out_of_range);
 }
 
-TEST(LazySequence, RemoveRangeAndInsertSequence) {
+TEST(LazySequence, InsertsSequence) {
     int items[] = {1, 2, 5};
     LazySequence<int> base(items, 3);
 
     int insertedItems[] = {3, 4};
     MutableArraySequence<int> insertSequence(insertedItems, 2);
-    auto inserted = base.InsertAt(insertSequence, 2);
+    auto inserted = base.InsertAt(insertSequence, Ordinal::Finite(2));
 
-    ASSERT_EQ(inserted->GetLength(), Cardinal::Finite(5));
+    ASSERT_EQ(inserted->GetLength(), Ordinal::Finite(5));
     EXPECT_EQ(inserted->Get(0), 1);
     EXPECT_EQ(inserted->Get(1), 2);
     EXPECT_EQ(inserted->Get(2), 3);
     EXPECT_EQ(inserted->Get(3), 4);
     EXPECT_EQ(inserted->Get(4), 5);
-
-    auto removed = inserted->RemoveRange(1, 3);
-    ASSERT_EQ(removed->GetLength(), Cardinal::Finite(2));
-    EXPECT_EQ(removed->Get(0), 1);
-    EXPECT_EQ(removed->Get(1), 5);
-    EXPECT_THROW(inserted->RemoveRange(4, 2), std::out_of_range);
 }
 
 TEST(LazySequence, InfiniteAndRecurrence) {
     auto naturals = LazySequence<int>::Infinite([](std::size_t index) { return static_cast<int>(index + 1); });
 
-    EXPECT_TRUE(naturals->GetLength().IsOmega());
+    EXPECT_TRUE(naturals->GetLength().IsInfinite());
     EXPECT_EQ(naturals->Get(999), 1000);
-    EXPECT_EQ(naturals->Get(Cardinal::Finite(4)), 5);
-    EXPECT_THROW(naturals->Get(Cardinal::Omega()), std::logic_error);
+    EXPECT_EQ(naturals->Get(Ordinal::Finite(4)), 5);
+    EXPECT_THROW(naturals->Get(Ordinal::Omega()), std::out_of_range);
     EXPECT_THROW(naturals->GetLast(), std::logic_error);
 
-    auto tail = naturals->GetSubsequence(Cardinal::Finite(10), Cardinal::Omega());
-    EXPECT_TRUE(tail->GetLength().IsOmega());
-    EXPECT_EQ(tail->Get(Cardinal::Finite(0)), 11);
-    EXPECT_EQ(tail->Get(Cardinal::Finite(4)), 15);
+    auto tail = naturals->GetSubsequence(Ordinal::Finite(10), Ordinal::Omega());
+    EXPECT_TRUE(tail->GetLength().IsInfinite());
+    EXPECT_EQ(tail->Get(Ordinal::Finite(0)), 11);
+    EXPECT_EQ(tail->Get(Ordinal::Finite(4)), 15);
 
     int seedItems[] = {0, 1};
     MutableArraySequence<int> seeds(seedItems, 2);
@@ -179,52 +191,49 @@ TEST(LazySequence, InfiniteAndRecurrence) {
     EXPECT_EQ(fibonacci.GetMaterializedCount(), static_cast<std::size_t>(11));
 }
 
-TEST(LazySequence, InfiniteAppendPrependConcatAndRemoveKeepLazyShape) {
+TEST(LazySequence, InfiniteAppendPrependAndConcatKeepOrdinalShape) {
     auto naturals = LazySequence<int>::Infinite([](std::size_t index) { return static_cast<int>(index + 1); });
+    auto shiftedNaturals = LazySequence<int>::Infinite([](std::size_t index) { return static_cast<int>(index + 101); });
 
     auto appended = naturals->Append(999);
-    EXPECT_TRUE(appended->GetLength().IsOmega());
+    EXPECT_EQ(appended->GetLength(), Ordinal::FromParts(1, 1));
     EXPECT_EQ(appended->Get(0), 1);
     EXPECT_EQ(appended->Get(10), 11);
+    EXPECT_EQ(appended->Get(Ordinal::Omega()), 999);
 
     auto prepended = naturals->Prepend(0);
-    EXPECT_TRUE(prepended->GetLength().IsOmega());
+    EXPECT_EQ(prepended->GetLength(), Ordinal::Omega());
     EXPECT_EQ(prepended->Get(0), 0);
     EXPECT_EQ(prepended->Get(1), 1);
 
     int finiteItems[] = {100, 200};
     LazySequence<int> finite(finiteItems, 2);
     auto infiniteFirst = naturals->Concat(finite);
-    EXPECT_TRUE(infiniteFirst->GetLength().IsOmega());
+    EXPECT_EQ(infiniteFirst->GetLength(), Ordinal::FromParts(1, 2));
     EXPECT_EQ(infiniteFirst->Get(4), 5);
+    EXPECT_EQ(infiniteFirst->Get(Ordinal::Omega()), 100);
+    EXPECT_EQ(infiniteFirst->Get(Ordinal::FromParts(1, 1)), 200);
 
     auto finiteFirst = finite.Concat(*naturals);
-    EXPECT_TRUE(finiteFirst->GetLength().IsOmega());
+    EXPECT_EQ(finiteFirst->GetLength(), Ordinal::Omega());
     EXPECT_EQ(finiteFirst->Get(0), 100);
     EXPECT_EQ(finiteFirst->Get(1), 200);
     EXPECT_EQ(finiteFirst->Get(2), 1);
     EXPECT_THROW(finite.Concat(nullptr), std::invalid_argument);
 
-    auto removedOne = naturals->RemoveAt(2);
-    EXPECT_TRUE(removedOne->GetLength().IsOmega());
-    EXPECT_EQ(removedOne->Get(0), 1);
-    EXPECT_EQ(removedOne->Get(1), 2);
-    EXPECT_EQ(removedOne->Get(2), 4);
-
-    auto removedRange = naturals->RemoveRange(1, 3);
-    EXPECT_TRUE(removedRange->GetLength().IsOmega());
-    EXPECT_EQ(removedRange->Get(0), 1);
-    EXPECT_EQ(removedRange->Get(1), 5);
+    auto twoInfiniteParts = naturals->Concat(*shiftedNaturals);
+    EXPECT_EQ(twoInfiniteParts->GetLength(), Ordinal::Omega(2));
+    EXPECT_EQ(twoInfiniteParts->Get(Ordinal::FromParts(1, 7)), 108);
 }
 
 TEST(LazySequence, MapWhereReduce) {
-    LazySequence<int> finite([](std::size_t index) { return static_cast<int>(index + 1); }, Cardinal::Finite(10));
+    LazySequence<int> finite([](std::size_t index) { return static_cast<int>(index + 1); }, Ordinal::Finite(10));
 
     auto squares = finite.Map<int>(std::function<int(int)>([](int value) { return value * value; }));
     EXPECT_EQ(squares->Get(3), 16);
 
     auto evens = finite.Where(std::function<bool(int)>([](int value) { return value % 2 == 0; }));
-    EXPECT_EQ(evens->GetLength(), Cardinal::Finite(5));
+    EXPECT_EQ(evens->GetLength(), Ordinal::Finite(5));
     EXPECT_EQ(evens->Get(0), 2);
     EXPECT_EQ(evens->Get(4), 10);
 
@@ -235,7 +244,7 @@ TEST(LazySequence, MapWhereReduce) {
 }
 
 TEST(LazySequence, MapWhereReduceValidateErrorsAndInfiniteReduce) {
-    LazySequence<int> finite([](std::size_t index) { return static_cast<int>(index + 1); }, Cardinal::Finite(5));
+    LazySequence<int> finite([](std::size_t index) { return static_cast<int>(index + 1); }, Ordinal::Finite(5));
 
     EXPECT_THROW(finite.Map<int>(std::function<int(int)>()), std::invalid_argument);
     EXPECT_THROW(finite.Where(std::function<bool(int)>()), std::invalid_argument);
@@ -243,7 +252,7 @@ TEST(LazySequence, MapWhereReduceValidateErrorsAndInfiniteReduce) {
     EXPECT_THROW(finite.ReduceFirstN<int>(3, 0, std::function<int(int, int)>()), std::invalid_argument);
 
     auto none = finite.Where(std::function<bool(int)>([](int) { return false; }));
-    EXPECT_EQ(none->GetLength(), Cardinal::Finite(0));
+    EXPECT_EQ(none->GetLength(), Ordinal::Finite(0));
     EXPECT_THROW(none->Get(0), std::out_of_range);
 
     auto naturals = LazySequence<int>::Infinite([](std::size_t index) { return static_cast<int>(index + 1); });
@@ -257,7 +266,7 @@ TEST(LazySequence, MapWhereReduceValidateErrorsAndInfiniteReduce) {
 
 TEST(LazySequence, TakeMaterializesRequestedPrefix) {
     LazySequence<int> sequence([](std::size_t index) { return static_cast<int>((index + 1) * 10); },
-                               Cardinal::Omega());
+                               Ordinal::Omega());
 
     auto taken = sequence.Take(4);
 
@@ -305,7 +314,7 @@ TEST(Streams, ReadStreamsValidateStateSeekingAndSharedSources) {
     EXPECT_THROW(SequenceReadStream<int>(std::shared_ptr<Sequence<int>>()), std::invalid_argument);
 
     auto sharedLazy = std::shared_ptr<LazySequence<int>>(
-        new LazySequence<int>([](std::size_t index) { return static_cast<int>(index + 1); }, Cardinal::Finite(2)));
+        new LazySequence<int>([](std::size_t index) { return static_cast<int>(index + 1); }, Ordinal::Finite(2)));
     LazySequenceReadStream<int> lazyStream(sharedLazy);
     lazyStream.Open();
     EXPECT_EQ(lazyStream.Seek(2), static_cast<std::size_t>(2));

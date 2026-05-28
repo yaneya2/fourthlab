@@ -44,18 +44,25 @@ namespace {
 		return value;
 	}
 
-	std::string FormatLength(Cardinal length) {
-		return length.IsOmega() ? "омега (бесконечная)" : std::to_string(length.Value());
+	std::string FormatLength(Ordinal length) {
+		return length.ToString();
 	}
 
-	Cardinal ReadLength() {
+	Ordinal ReadOrdinal(const std::string &prompt) {
+		std::cout << prompt << "\n";
+		std::size_t omegaCoefficient = ReadValue<std::size_t>("Коэффициент при omega: ");
+		std::size_t finitePart = ReadValue<std::size_t>("Конечная часть: ");
+		return Ordinal::FromParts(omegaCoefficient, finitePart);
+	}
+
+	Ordinal ReadLength() {
 		std::cout << "1. Конечная длина\n";
 		std::cout << "2. Бесконечная длина (омега)\n";
 		int choice = ReadValue<int>("Выбор: ");
 		if (choice == 2) {
-			return Cardinal::Omega();
+			return Ordinal::Omega();
 		}
-		return Cardinal::Finite(ReadValue<std::size_t>("Длина: "));
+		return Ordinal::Finite(ReadValue<std::size_t>("Длина: "));
 	}
 
 	MutableArraySequence<Number> ReadItems() {
@@ -92,8 +99,8 @@ namespace {
 	}
 
 	std::unique_ptr<Lazy> CreateByIndexRule(std::function<Number(std::size_t)> rule) {
-		Cardinal length = ReadLength();
-		if (length.IsOmega()) {
+		Ordinal length = ReadLength();
+		if (length.IsInfinite()) {
 			return Lazy::Infinite(std::move(rule));
 		}
 		return Lazy::FromIndexFunction(std::move(rule), length);
@@ -169,11 +176,25 @@ namespace {
 		throw std::invalid_argument("Неизвестный генератор");
 	}
 
+	std::unique_ptr<Lazy> CreateLazyOperand() {
+		std::cout << "\nПоследовательность для операции\n";
+		std::cout << "1. Ввести конечную последовательность\n";
+		std::cout << "2. Создать через генератор\n";
+		int choice = ReadValue<int>("Выбор: ");
+		if (choice == 1) {
+			return CreateFiniteLazy();
+		}
+		if (choice == 2) {
+			return CreateGeneratedLazy();
+		}
+		throw std::invalid_argument("Неизвестный тип последовательности");
+	}
+
 	std::size_t PrefixCount(const Lazy &sequence) {
 		std::size_t requested = ReadValue<std::size_t>("Сколько элементов вывести: ");
-		Cardinal length = sequence.GetLength();
-		if (length.IsFinite() && requested > length.Value()) {
-			return length.Value();
+		Ordinal length = sequence.GetLength();
+		if (length.IsFinite() && requested > length.FinitePart()) {
+			return length.FinitePart();
 		}
 		return requested;
 	}
@@ -293,71 +314,53 @@ namespace {
 	void LazyWorkspace(std::unique_ptr<Lazy> sequence) {
 		while (true) {
 			std::cout << "\nОперации над текущей LazySequence\n";
-			std::cout << "1. Вывести префикс\n2. Показать длину и размер кэша\n3. GetFirst / GetLast\n";
-			std::cout << "4. Get по индексу\n5. Конечная подпоследовательность\n6. Бесконечный хвост\n";
-			std::cout << "7. Append\n8. Prepend\n9. InsertAt элемента\n10. RemoveAt\n11. RemoveRange\n";
-			std::cout << "12. Concat с введённой последовательностью\n13. Вставить введённую последовательность\n";
-			std::cout << "14. Map\n15. Where\n16. Reduce всей последовательности\n17. ReduceFirstN\n";
-			std::cout << "18. Take\n19. Обход через GetEnumerator\n0. Назад\n";
+			std::cout << "1. Показать длину и размер кэша\n2. GetFirst / GetLast\n";
+			std::cout << "3. Get по индексу\n4. Конечная подпоследовательность\n";
+			std::cout << "5. Concat с последовательностью\n6. Вставить последовательность\n";
+			std::cout << "7. Map\n8. Where\n9. Reduce всей последовательности\n10. ReduceFirstN\n";
+			std::cout << "11. Обход через GetEnumerator\n12. Append последовательности\n13. Prepend последовательности\n0. Назад\n";
 			int choice = ReadValue<int>("Выбор: ");
 			if (choice == 0) {
 				return;
 			}
 			try {
 				if (choice == 1) {
-					PrintLazyPrefix(*sequence, PrefixCount(*sequence));
-				} else if (choice == 2) {
 					std::cout << "Длина: " << FormatLength(sequence->GetLength()) << "\n";
 					std::cout << "Материализовано: " << sequence->GetMaterializedCount() << "\n";
-				} else if (choice == 3) {
+				} else if (choice == 2) {
 					std::cout << "Первый элемент: " << sequence->GetFirst() << "\n";
 					std::cout << "Последний элемент: " << sequence->GetLast() << "\n";
+				} else if (choice == 3) {
+					Ordinal index = ReadOrdinal("Индекс");
+					std::cout << "Значение: " << sequence->Get(index) << "\n";
 				} else if (choice == 4) {
-					std::size_t index = ReadValue<std::size_t>("Индекс: ");
-					std::cout << "Значение: " << sequence->Get(Cardinal::Finite(index)) << "\n";
-				} else if (choice == 5) {
 					std::size_t start = ReadValue<std::size_t>("Начальный индекс: ");
 					std::size_t end = ReadValue<std::size_t>("Конечный индекс: ");
-					sequence = sequence->GetSubsequence(Cardinal::Finite(start), Cardinal::Finite(end));
+					sequence = sequence->GetSubsequence(Ordinal::Finite(start), Ordinal::Finite(end));
 					std::cout << "Подпоследовательность стала текущей.\n";
-				} else if (choice == 6) {
-					std::size_t start = ReadValue<std::size_t>("Начальный индекс хвоста: ");
-					sequence = sequence->GetSubsequence(Cardinal::Finite(start), Cardinal::Omega());
-					std::cout << "Бесконечный хвост стал текущей последовательностью.\n";
-				} else if (choice == 7) {
-					sequence = sequence->Append(ReadValue<Number>("Значение: "));
-				} else if (choice == 8) {
-					sequence = sequence->Prepend(ReadValue<Number>("Значение: "));
-				} else if (choice == 9) {
-					Number item = ReadValue<Number>("Значение: ");
-					std::size_t index = ReadValue<std::size_t>("Индекс: ");
-					sequence = sequence->InsertAt(item, index);
-				} else if (choice == 10) {
-					sequence = sequence->RemoveAt(ReadValue<std::size_t>("Индекс: "));
-				} else if (choice == 11) {
-					std::size_t start = ReadValue<std::size_t>("Начальный индекс: ");
-					std::size_t count = ReadValue<std::size_t>("Количество удаляемых элементов: ");
-					sequence = sequence->RemoveRange(start, count);
-				} else if (choice == 12) {
-					auto second = CreateFiniteLazy();
+				}else if (choice == 5) {
+					auto second = CreateLazyOperand();
 					sequence = sequence->Concat(*second);
-				} else if (choice == 13) {
-					MutableArraySequence<Number> inserted = ReadItems();
-					std::size_t index = ReadValue<std::size_t>("Индекс вставки: ");
-					sequence = sequence->InsertAt(static_cast<const Sequence<Number> &>(inserted), index);
-				} else if (choice == 14) {
+				} else if (choice == 6) {
+					auto inserted = CreateLazyOperand();
+					Ordinal index = ReadOrdinal("Индекс вставки");
+					sequence = sequence->InsertAt(*inserted, index);
+				} else if (choice == 7) {
 					MapCurrent(sequence);
-				} else if (choice == 15) {
+				} else if (choice == 8) {
 					FilterCurrent(sequence);
-				} else if (choice == 16) {
+				} else if (choice == 9) {
 					ReduceCurrent(*sequence, false);
-				} else if (choice == 17) {
+				} else if (choice == 10) {
 					ReduceCurrent(*sequence, true);
-				} else if (choice == 18) {
-					auto result = sequence->Take(ReadValue<std::size_t>("Количество элементов: "));
-					PrintFiniteSequence(*result);
-				} else if (choice == 19) {
+				}else if (choice == 11) {
 					EnumerateCurrent(*sequence);
+				} else if (choice == 12) {
+					auto appended = CreateLazyOperand();
+					sequence = sequence->Append(*appended);
+				} else if (choice == 13) {
+					auto prepended = CreateLazyOperand();
+					sequence = sequence->Prepend(*prepended);
 				} else {
 					std::cout << "Неизвестная команда.\n";
 				}
@@ -678,7 +681,7 @@ namespace {
 
 	void RunForecastScenario(std::unique_ptr<LazySequence<Event> > events, const ForecastSettings &settings) {
 		std::size_t available = events->GetLength().IsFinite()
-			                        ? events->GetLength().Value()
+			                        ? events->GetLength().FinitePart()
 			                        : ReadValue<std::size_t>("Количество обрабатываемых событий: ");
 		std::size_t count = ReadValue<std::size_t>("Сколько событий обработать (не более доступных): ");
 		if (count > available) {
