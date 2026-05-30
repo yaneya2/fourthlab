@@ -173,8 +173,8 @@ public:
     }
 
     bool IsEndOfStream() const override {
-        Cardinal length = source_->GetLength();
-        return length.IsFinite() && position_ >= length.Value();
+        Ordinal length = source_->GetLength();
+        return length.IsFinite() && position_ >= length.FinitePart();
     }
 
     T Read() override {
@@ -182,7 +182,7 @@ public:
         if (IsEndOfStream()) {
             throw EndOfStream("LazySequenceReadStream reached end");
         }
-        T value = source_->Get(position_);
+        T value = source_->Get(Ordinal::Finite(position_));
         ++position_;
         return value;
     }
@@ -197,8 +197,8 @@ public:
 
     std::size_t Seek(std::size_t index) override {
         EnsureOpened();
-        Cardinal length = source_->GetLength();
-        if (length.IsFinite() && index > length.Value()) {
+        Ordinal length = source_->GetLength();
+        if (length.IsFinite() && index > length.FinitePart()) {
             throw EndOfStream("Seek index is out of range");
         }
         position_ = index;

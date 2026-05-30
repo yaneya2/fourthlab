@@ -22,11 +22,13 @@ private:
 	public:
 		virtual ~Generator() = default;
 
-		virtual Ordinal GetLength() const = 0;
+		[[nodiscard]] virtual Ordinal GetLength() const = 0;
 
-		virtual bool HasNext(Ordinal nextIndex) const = 0;
+		[[nodiscard]] virtual bool HasNext(Ordinal nextIndex) const = 0;
 
 		virtual T GetNext(Ordinal nextIndex) = 0;
+
+		virtual std::unique_ptr<Generator> Clone() const = 0;
 	};
 
 	template<class SourceT>
@@ -35,37 +37,53 @@ private:
 	class WhereGenerator;
 
 	struct State {
-		explicit State(std::shared_ptr<Generator> generator)
+		explicit State(std::unique_ptr<Generator> generator)
 			: generator_(std::move(generator)), cache_() {
 		}
 
-		std::shared_ptr<Generator> generator_;
+		State(const State &other)
+			: generator_(other.generator_->Clone()), cache_(other.cache_) {
+		}
+
+		State &operator=(const State &other) {
+			if (this != &other) {
+				generator_ = other.generator_->Clone();
+				cache_ = other.cache_;
+			}
+			return *this;
+		}
+
+		std::unique_ptr<Generator> generator_;
 		MutableArraySequence<T> cache_;
 	};
 
-	std::shared_ptr<State> state_;
+	std::unique_ptr<State> state_;
 
 	class EmptyGenerator : public Generator {
 	public:
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return Ordinal::Finite(0);
 		}
 
-		bool HasNext(Ordinal) const override {
+		[[nodiscard]] bool HasNext(Ordinal) const override {
 			return false;
 		}
 
 		T GetNext(Ordinal) override {
 			throw std::out_of_range("LazySequence is empty");
 		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new EmptyGenerator(*this));
+		}
 	};
 
-	class ArrayGenerator : public Generator {
+	class SequenceGenerator : public Generator {
 	private:
 		MutableArraySequence<T> data_;
 
 	public:
-		ArrayGenerator(const T *items, std::size_t count) : data_() {
+		SequenceGenerator(const T *items, std::size_t count) : data_() {
 			if (items == nullptr && count > 0) {
 				throw std::invalid_argument("LazySequence source array is null");
 			}
@@ -75,7 +93,7 @@ private:
 			}
 		}
 
-		explicit ArrayGenerator(const Sequence<T> &source) : data_() {
+		explicit SequenceGenerator(const Sequence<T> &source) : data_() {
 			auto *enumerator = source.GetEnumerator();
 			while (enumerator->MoveNext()) {
 				data_.Append(enumerator->Current());
@@ -83,11 +101,11 @@ private:
 			delete enumerator;
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return Ordinal::Finite(data_.GetLength());
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return Ordinal::Finite(data_.GetLength()).ContainsIndex(nextIndex);
 		}
 
@@ -97,56 +115,9 @@ private:
 			}
 			return data_.Get(nextIndex.FinitePart());
 		}
-	};
 
-	class SequenceGenerator : public Generator {
-	private:
-		Sequence<T> *source_;
-		std::unique_ptr<IEnumerator<T> > enumerator_;
-		std::size_t position_;
-
-	public:
-		explicit SequenceGenerator(Sequence<T> *source)
-			: source_(source), enumerator_(nullptr), position_(0) {
-			if (source_ == nullptr) {
-				throw std::invalid_argument("SequenceGenerator source is null");
-			}
-		}
-
-		Ordinal GetLength() const override {
-			return Ordinal::Finite(source_->GetLength());
-		}
-
-		bool HasNext(Ordinal nextIndex) const override {
-			return Ordinal::Finite(source_->GetLength()).ContainsIndex(nextIndex);
-		}
-
-		T GetNext(Ordinal nextIndex) override {
-			if (!HasNext(nextIndex)) {
-				throw std::out_of_range("Index out of range");
-			}
-			std::size_t finiteIndex = nextIndex.FinitePart();
-
-			if (!enumerator_ || finiteIndex < position_) {
-				enumerator_.reset(source_->GetEnumerator());
-				position_ = 0;
-			}
-
-			while (position_ <= finiteIndex) {
-				if (!enumerator_->MoveNext()) {
-					throw std::out_of_range("Index out of range");
-				}
-
-				if (position_ == finiteIndex) {
-					T result = enumerator_->Current();
-					++position_;
-					return result;
-				}
-
-				++position_;
-			}
-
-			throw std::out_of_range("Index out of range");
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new SequenceGenerator(*this));
 		}
 	};
 
@@ -157,7 +128,7 @@ private:
 		Ordinal length_;
 
 	public:
-		RecurrenceGenerator(std::function<T(Sequence<T> *)> rule, Sequence<T> *firstItems, Ordinal length)//заменить на ссылку
+		RecurrenceGenerator(std::function<T(Sequence<T> *)> rule, Sequence<T> *firstItems, Ordinal length)
 			: generatedItems_(), rule_(std::move(rule)), length_(length) {
 			if (!rule_) {
 				throw std::invalid_argument("Recurrence rule is empty");
@@ -176,11 +147,11 @@ private:
 			delete enumerator;
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return length_;
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return length_.ContainsIndex(nextIndex);
 		}
 
@@ -198,26 +169,30 @@ private:
 			}
 			return generatedItems_.Get(finiteIndex);
 		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new RecurrenceGenerator(*this));
+		}
 	};
 
-	class IndexFunctionGenerator : public Generator {
+	class FunctionGenerator : public Generator {
 	private:
 		std::function<T(std::size_t)> rule_;
 		Ordinal length_;
 
 	public:
-		IndexFunctionGenerator(std::function<T(std::size_t)> rule, Ordinal length)
+		FunctionGenerator(std::function<T(std::size_t)> rule, Ordinal length)
 			: rule_(std::move(rule)), length_(length) {
 			if (!rule_) {
 				throw std::invalid_argument("Index function rule is empty");
 			}
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return length_;
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return length_.ContainsIndex(nextIndex);
 		}
 
@@ -229,6 +204,10 @@ private:
 				throw std::logic_error("Index function generator supports only finite indexes");
 			}
 			return rule_(nextIndex.FinitePart());
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new FunctionGenerator(*this));
 		}
 	};
 
@@ -243,34 +222,23 @@ private:
 		return Ordinal::FromParts(value.OmegaCoefficient(), value.FinitePart() + 1);
 	}
 
-	static Ordinal SubtractPrefix(Ordinal index, Ordinal prefixLength, const char *message) {
+	static Ordinal solveNewLength(Ordinal index, Ordinal prefixLength, bool includeRightBound = false) {
 		if (index < prefixLength) {
-			throw std::out_of_range(message);
+			throw std::out_of_range("Invalid ordinal subtraction");
 		}
+		Ordinal result = Ordinal::Finite(0);
 		if (prefixLength.IsFinite()) {
 			if (index.IsFinite()) {
-				return Ordinal::Finite(index.FinitePart() - prefixLength.FinitePart());
+				result = Ordinal::Finite(index.FinitePart() - prefixLength.FinitePart());
+			} else {
+				result = index;
 			}
-			return index;
+		} else if (index.OmegaCoefficient() == prefixLength.OmegaCoefficient()) {
+			result = Ordinal::Finite(index.FinitePart() - prefixLength.FinitePart());
+		} else {
+			result = Ordinal::FromParts(index.OmegaCoefficient() - prefixLength.OmegaCoefficient(), index.FinitePart());
 		}
-		if (index.OmegaCoefficient() == prefixLength.OmegaCoefficient()) {
-			return Ordinal::Finite(index.FinitePart() - prefixLength.FinitePart());
-		}
-		return Ordinal::FromParts(index.OmegaCoefficient() - prefixLength.OmegaCoefficient(), index.FinitePart());
-	}
-
-	static Ordinal InclusiveIntervalLength(Ordinal startIndex, Ordinal endIndex) {
-		if (endIndex < startIndex) {
-			throw std::out_of_range("Invalid subsequence bounds");
-		}
-		if (startIndex.OmegaCoefficient() == endIndex.OmegaCoefficient()) {
-			if (!CanAddOne(endIndex.FinitePart() - startIndex.FinitePart())) {
-				throw std::overflow_error("Subsequence length overflow");
-			}
-			return Ordinal::Finite(endIndex.FinitePart() - startIndex.FinitePart() + 1);
-		}
-		return AddOneToFinitePart(Ordinal::FromParts(
-			endIndex.OmegaCoefficient() - startIndex.OmegaCoefficient(), endIndex.FinitePart()));
+		return includeRightBound ? AddOneToFinitePart(result) : result;
 	}
 
 	class PrependGenerator : public Generator {
@@ -284,11 +252,11 @@ private:
 			: source_(std::move(source)), prepended_(std::move(prepended)) {
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return prepended_->GetLength() + source_->GetLength();
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return GetLength().ContainsIndex(nextIndex);
 		}
 
@@ -301,7 +269,11 @@ private:
 			if (prependedLength.ContainsIndex(nextIndex)) {
 				return prepended_->Get(nextIndex);
 			}
-			return source_->Get(SubtractPrefix(nextIndex, prependedLength, "Index out of range"));
+			return source_->Get(solveNewLength(nextIndex, prependedLength));
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new PrependGenerator(*this));
 		}
 	};
 
@@ -316,11 +288,11 @@ private:
 			: source_(std::move(source)), appended_(std::move(appended)) {
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return source_->GetLength() + appended_->GetLength();
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return GetLength().ContainsIndex(nextIndex);
 		}
 
@@ -333,7 +305,11 @@ private:
 			if (length.ContainsIndex(nextIndex)) {
 				return source_->Get(nextIndex);
 			}
-			return appended_->Get(SubtractPrefix(nextIndex, length, "Index out of range"));
+			return appended_->Get(solveNewLength(nextIndex, length));
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new AppendGenerator(*this));
 		}
 	};
 
@@ -354,14 +330,14 @@ private:
 			}
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			Ordinal prefixLength = index_;
 			Ordinal insertedLength = inserted_->GetLength();
-			Ordinal suffixLength = SubtractPrefix(source_->GetLength(), prefixLength, "Insert index out of range");
+			Ordinal suffixLength = solveNewLength(source_->GetLength(), prefixLength);
 			return prefixLength + insertedLength + suffixLength;
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return GetLength().ContainsIndex(nextIndex);
 		}
 
@@ -373,14 +349,18 @@ private:
 				return source_->Get(nextIndex);
 			}
 
-			Ordinal localInsertedIndex = SubtractPrefix(nextIndex, index_, "Index out of range");
+			Ordinal localInsertedIndex = solveNewLength(nextIndex, index_);
 			Ordinal insertedLength = inserted_->GetLength();
 			if (insertedLength.ContainsIndex(localInsertedIndex)) {
 				return inserted_->Get(localInsertedIndex);
 			}
 
-			Ordinal sourceSuffixIndex = SubtractPrefix(localInsertedIndex, insertedLength, "Index out of range");
+			Ordinal sourceSuffixIndex = solveNewLength(localInsertedIndex, insertedLength);
 			return source_->Get(index_ + sourceSuffixIndex);
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new InsertGenerator(*this));
 		}
 	};
 
@@ -394,11 +374,11 @@ private:
 			: first_(std::move(first)), second_(std::move(second)) {
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return first_->GetLength() + second_->GetLength();
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return GetLength().ContainsIndex(nextIndex);
 		}
 
@@ -410,7 +390,11 @@ private:
 			if (firstLength.ContainsIndex(nextIndex)) {
 				return first_->Get(nextIndex);
 			}
-			return second_->Get(SubtractPrefix(nextIndex, firstLength, "Index out of range"));
+			return second_->Get(solveNewLength(nextIndex, firstLength));
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new ConcatGenerator(*this));
 		}
 	};
 
@@ -425,11 +409,11 @@ private:
 			: source_(std::move(source)), start_(start), length_(length) {
 		}
 
-		Ordinal GetLength() const override {
+		[[nodiscard]] Ordinal GetLength() const override {
 			return length_;
 		}
 
-		bool HasNext(Ordinal nextIndex) const override {
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
 			return length_.ContainsIndex(nextIndex);
 		}
 
@@ -439,6 +423,88 @@ private:
 			}
 			Ordinal sourceIndex = start_ + nextIndex;
 			return source_->Get(sourceIndex);
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new SubsequenceGenerator(*this));
+		}
+	};
+
+	template<class SourceT>
+	class MapGeneratorFrom : public Generator {
+	private:
+		std::shared_ptr<LazySequence<SourceT> > source_;
+		std::function<T(SourceT)> mapper_;
+
+	public:
+		MapGeneratorFrom(std::shared_ptr<LazySequence<SourceT> > source, std::function<T(SourceT)> mapper)
+			: source_(std::move(source)), mapper_(std::move(mapper)) {
+		}
+
+		[[nodiscard]] Ordinal GetLength() const override {
+			return source_->GetLength();
+		}
+
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
+			return source_->GetLength().ContainsIndex(nextIndex);
+		}
+
+		T GetNext(Ordinal nextIndex) override {
+			return mapper_(source_->Get(nextIndex));
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new MapGeneratorFrom(*this));
+		}
+	};
+
+	class WhereGenerator : public Generator {
+	private:
+		std::shared_ptr<LazySequence<T> > source_;
+		std::function<bool(T)> predicate_;
+		std::size_t sourceIndex_;
+
+	public:
+		WhereGenerator(std::shared_ptr<LazySequence<T> > source, std::function<bool(T)> predicate)
+			: source_(std::move(source)), predicate_(std::move(predicate)), sourceIndex_(0) {
+		}
+
+		[[nodiscard]] Ordinal GetLength() const override {
+			Ordinal sourceLength = source_->GetLength();
+			if (sourceLength.IsInfinite()) {
+				return sourceLength;
+			}
+
+			std::size_t count = 0;
+			for (std::size_t i = 0; i < sourceLength.FinitePart(); ++i) {
+				if (predicate_(source_->Get(Ordinal::Finite(i)))) {
+					++count;
+				}
+			}
+			return Ordinal::Finite(count);
+		}
+
+		[[nodiscard]] bool HasNext(Ordinal nextIndex) const override {
+			return GetLength().ContainsIndex(nextIndex);
+		}
+
+		T GetNext(Ordinal nextIndex) override {
+			if (!nextIndex.IsFinite()) {
+				throw std::logic_error("Where generator supports only finite indexes");
+			}
+			Ordinal sourceLength = source_->GetLength();
+			while (sourceLength.IsInfinite() || sourceIndex_ < sourceLength.FinitePart()) {
+				T current = source_->Get(Ordinal::Finite(sourceIndex_));
+				++sourceIndex_;
+				if (predicate_(current)) {
+					return current;
+				}
+			}
+			throw std::out_of_range("No next element satisfies predicate");
+		}
+
+		std::unique_ptr<Generator> Clone() const override {
+			return std::unique_ptr<Generator>(new WhereGenerator(*this));
 		}
 	};
 
@@ -462,35 +528,44 @@ private:
 		return std::make_shared<LazySequence<T> >(*this);
 	}
 
-	static std::shared_ptr<LazySequence<T> > Singleton(const T &item) {
+	static std::shared_ptr<LazySequence<T> > createSeqFromElem(const T &item) {
 		T items[] = {item};
 		return std::make_shared<LazySequence<T> >(items, 1);
 	}
 
-	explicit LazySequence(std::shared_ptr<Generator> generator)
-		: state_(std::make_shared<State>(std::move(generator))) {
+	explicit LazySequence(std::unique_ptr<Generator> generator)
+		: state_(std::unique_ptr<State>(new State(std::move(generator)))) {
 	}
 
+	template<class U>
+	friend class LazySequence;
+
 public:
-	LazySequence() : state_(std::make_shared<State>(std::make_shared<EmptyGenerator>())) {
+	LazySequence() : state_(std::unique_ptr<State>(new State(std::unique_ptr<Generator>(new EmptyGenerator())))) {
 	}
 
 	LazySequence(const T *items, std::size_t count)
-		: state_(std::make_shared<State>(std::make_shared<ArrayGenerator>(items, count))) {
+		: state_(std::unique_ptr<State>(
+			new State(std::unique_ptr<Generator>(new SequenceGenerator(items, count))))) {
 	}
 
 	explicit LazySequence(const Sequence<T> &sequence)
-		: state_(std::make_shared<State>(std::make_shared<ArrayGenerator>(sequence))) {
+		: state_(std::unique_ptr<State>(
+			new State(std::unique_ptr<Generator>(new SequenceGenerator(sequence))))) {
 	}
 
-	explicit LazySequence(Sequence<T> *sequence)
-		: state_(std::make_shared<State>(std::make_shared<SequenceGenerator>(sequence))) {
+	explicit LazySequence(Sequence<T> *sequence) {
+		if (sequence == nullptr) {
+			throw std::invalid_argument("LazySequence source sequence is null");
+		}
+		this->state_ = std::unique_ptr<State>(
+			new State(std::unique_ptr<Generator>(new SequenceGenerator(*sequence))));
 	}
 
 	LazySequence(std::function<T(Sequence<T> *)> recurrenceRule, Sequence<T> *firstItems,
 	             Ordinal length = Ordinal::Omega())
-		: state_(std::make_shared<State>(
-			std::make_shared<RecurrenceGenerator>(std::move(recurrenceRule), firstItems, length))) {
+		: state_(std::unique_ptr<State>(new State(std::unique_ptr<Generator>(
+			new RecurrenceGenerator(std::move(recurrenceRule), firstItems, length))))) {
 	}
 
 	LazySequence(T (*recurrenceRule)(Sequence<T> *), Sequence<T> *firstItems,
@@ -499,13 +574,24 @@ public:
 	}
 
 	LazySequence(std::function<T(std::size_t)> indexRule, Ordinal length)
-		: state_(std::make_shared<State>(
-			std::make_shared<IndexFunctionGenerator>(std::move(indexRule), length))) {
+		: state_(std::unique_ptr<State>(new State(std::unique_ptr<Generator>(
+			new FunctionGenerator(std::move(indexRule), length))))) {
 	}
 
-	LazySequence(const LazySequence &other) = default;
+	LazySequence(const LazySequence &other)
+		: state_(std::unique_ptr<State>(new State(*other.state_))) {
+	}
 
-	LazySequence &operator=(const LazySequence &other) = default;
+	LazySequence(LazySequence &&other) noexcept = default;
+
+	LazySequence &operator=(const LazySequence &other) {
+		if (this != &other) {
+			state_ = std::unique_ptr<State>(new State(*other.state_));
+		}
+		return *this;
+	}
+
+	LazySequence &operator=(LazySequence &&other) noexcept = default;
 
 	static std::unique_ptr<LazySequence<T> > FromIndexFunction(std::function<T(std::size_t)> indexRule,
 	                                                           Ordinal length) {
@@ -547,17 +633,6 @@ public:
 		return state_->cache_.Get(finiteIndex);
 	}
 
-	T Get(std::size_t index) const {
-		return Get(Ordinal::Finite(index));
-	}
-
-	T Get(int index) const {
-		if (index < 0) {
-			throw std::out_of_range("Negative index");
-		}
-		return Get(static_cast<std::size_t>(index));
-	}
-
 	std::unique_ptr<LazySequence<T> > GetSubsequence(Ordinal startIndex, Ordinal endIndex) const {
 		Ordinal sourceLength = GetLength();
 		if (endIndex < startIndex) {
@@ -567,17 +642,17 @@ public:
 			if (!sourceLength.ContainsIndex(startIndex)) {
 				throw std::out_of_range("Subsequence index out of range");
 			}
-			Ordinal count = SubtractPrefix(sourceLength, startIndex, "Subsequence index out of range");
+			Ordinal count = solveNewLength(sourceLength, startIndex);
 			return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(
-				std::make_shared<SubsequenceGenerator>(SharedCopy(), startIndex, count)));
+				std::unique_ptr<Generator>(new SubsequenceGenerator(SharedCopy(), startIndex, count))));
 		}
 		if (!sourceLength.ContainsIndex(startIndex) || !sourceLength.ContainsIndex(endIndex)) {
 			throw std::out_of_range("Subsequence index out of range");
 		}
 
-		Ordinal count = InclusiveIntervalLength(startIndex, endIndex);
+		Ordinal count = solveNewLength(endIndex, startIndex, true);
 		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(
-			std::make_shared<SubsequenceGenerator>(SharedCopy(), startIndex, count)));
+			std::unique_ptr<Generator>(new SubsequenceGenerator(SharedCopy(), startIndex, count))));
 	}
 
 	std::unique_ptr<LazySequence<T> > GetSubsequence(std::size_t startIndex, std::size_t endIndex) const {
@@ -591,20 +666,20 @@ public:
 		return GetSubsequence(static_cast<std::size_t>(startIndex), static_cast<std::size_t>(endIndex));
 	}
 
-	Ordinal GetLength() const {
+	[[nodiscard]] Ordinal GetLength() const {
 		return state_->generator_->GetLength();
 	}
 
-	std::size_t GetMaterializedCount() const {
+	[[nodiscard]] std::size_t GetMaterializedCount() const {
 		return state_->cache_.GetLength();
 	}
 
 	std::unique_ptr<LazySequence<T> > Append(const T &item) const {
-		return Append(*Singleton(item));
+		return Append(*createSeqFromElem(item));
 	}
 
 	std::unique_ptr<LazySequence<T> > Prepend(const T &item) const {
-		return Prepend(*Singleton(item));
+		return Prepend(*createSeqFromElem(item));
 	}
 
 	std::unique_ptr<LazySequence<T> > Append(const Sequence<T> &items) const {
@@ -612,8 +687,8 @@ public:
 	}
 
 	std::unique_ptr<LazySequence<T> > Append(const LazySequence<T> &items) const {
-		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::make_shared<AppendGenerator>(
-			SharedCopy(), std::make_shared<LazySequence<T> >(items))));
+		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::unique_ptr<Generator>(
+			new AppendGenerator(SharedCopy(), std::make_shared<LazySequence<T> >(items)))));
 	}
 
 	std::unique_ptr<LazySequence<T> > Prepend(const Sequence<T> &items) const {
@@ -621,12 +696,12 @@ public:
 	}
 
 	std::unique_ptr<LazySequence<T> > Prepend(const LazySequence<T> &items) const {
-		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::make_shared<PrependGenerator>(
-			SharedCopy(), std::make_shared<LazySequence<T> >(items))));
+		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::unique_ptr<Generator>(
+			new PrependGenerator(SharedCopy(), std::make_shared<LazySequence<T> >(items)))));
 	}
 
 	std::unique_ptr<LazySequence<T> > InsertAt(const T &item, std::size_t index) const {
-		return InsertAt(*Singleton(item), Ordinal::Finite(index));
+		return InsertAt(*createSeqFromElem(item), Ordinal::Finite(index));
 	}
 
 	std::unique_ptr<LazySequence<T> > InsertAt(const T &item, int index) const {
@@ -641,13 +716,13 @@ public:
 	}
 
 	std::unique_ptr<LazySequence<T> > InsertAt(const LazySequence<T> &items, Ordinal index) const {
-		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::make_shared<InsertGenerator>(
-			SharedCopy(), std::make_shared<LazySequence<T> >(items), index)));
+		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::unique_ptr<Generator>(
+			new InsertGenerator(SharedCopy(), std::make_shared<LazySequence<T> >(items), index))));
 	}
 
 	std::unique_ptr<LazySequence<T> > Concat(const LazySequence<T> &other) const {
-		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(
-			std::make_shared<ConcatGenerator>(SharedCopy(), std::make_shared<LazySequence<T> >(other))));
+		return std::unique_ptr<LazySequence<T> >(new LazySequence<T>(std::unique_ptr<Generator>(
+			new ConcatGenerator(SharedCopy(), std::make_shared<LazySequence<T> >(other)))));
 	}
 
 	std::unique_ptr<LazySequence<T> > Concat(const LazySequence<T> *other) const {
@@ -663,10 +738,9 @@ public:
 			throw std::invalid_argument("Map function is empty");
 		}
 
-		auto generator =
-				std::make_shared<typename LazySequence<T2>::template MapGeneratorFrom<T> >(SharedCopy(),
-					std::move(mapper));
-		return std::unique_ptr<LazySequence<T2> >(new LazySequence<T2>(generator));
+		std::unique_ptr<typename LazySequence<T2>::Generator> generator(
+			new typename LazySequence<T2>::template MapGeneratorFrom<T>(SharedCopy(), std::move(mapper)));
+		return std::unique_ptr<LazySequence<T2> >(new LazySequence<T2>(std::move(generator)));
 	}
 
 	std::unique_ptr<LazySequence<T> > Where(std::function<bool(T)> predicate) const {
@@ -675,7 +749,8 @@ public:
 		}
 
 		return std::unique_ptr<LazySequence<T> >(
-			new LazySequence<T>(std::make_shared<WhereGenerator>(SharedCopy(), std::move(predicate))));
+			new LazySequence<T>(std::unique_ptr<Generator>(
+				new WhereGenerator(SharedCopy(), std::move(predicate)))));
 	}
 
 	template<class TResult>
@@ -687,7 +762,7 @@ public:
 
 		TResult result = initialValue;
 		for (std::size_t i = 0; i < count; ++i) {
-			result = reducer(result, Get(i));
+			result = reducer(result, Get(Ordinal::Finite(i)));
 		}
 		return result;
 	}
@@ -727,7 +802,7 @@ public:
 				if (!currentValid_ || index_ == 0) {
 					throw std::out_of_range("Enumerator out of range");
 				}
-				return sequence_->Get(index_ - 1);
+			return sequence_->Get(Ordinal::Finite(index_ - 1));
 			}
 
 			void Reset() override {
@@ -742,84 +817,10 @@ public:
 	std::unique_ptr<Sequence<T> > Take(std::size_t count) const {
 		std::unique_ptr<Sequence<T> > result(new MutableArraySequence<T>());
 		for (std::size_t i = 0; i < count; ++i) {
-			result->Append(Get(i));
+			result->Append(Get(Ordinal::Finite(i)));
 		}
 		return result;
 	}
-
-private:
-	template<class SourceT>
-	class MapGeneratorFrom : public Generator {
-	private:
-		std::shared_ptr<LazySequence<SourceT> > source_;
-		std::function<T(SourceT)> mapper_;
-
-	public:
-		MapGeneratorFrom(std::shared_ptr<LazySequence<SourceT> > source, std::function<T(SourceT)> mapper)
-			: source_(std::move(source)), mapper_(std::move(mapper)) {
-		}
-
-		Ordinal GetLength() const override {
-			return source_->GetLength();
-		}
-
-		bool HasNext(Ordinal nextIndex) const override {
-			return source_->GetLength().ContainsIndex(nextIndex);
-		}
-
-		T GetNext(Ordinal nextIndex) override {
-			return mapper_(source_->Get(nextIndex));
-		}
-	};
-
-	class WhereGenerator : public Generator {
-	private:
-		std::shared_ptr<LazySequence<T> > source_;
-		std::function<bool(T)> predicate_;
-		std::size_t sourceIndex_;
-
-	public:
-		WhereGenerator(std::shared_ptr<LazySequence<T> > source, std::function<bool(T)> predicate)
-			: source_(std::move(source)), predicate_(std::move(predicate)), sourceIndex_(0) {
-		}
-
-		Ordinal GetLength() const override {
-			Ordinal sourceLength = source_->GetLength();
-			if (sourceLength.IsInfinite()) {
-				return Ordinal::Omega();
-			}
-
-			std::size_t count = 0;
-			for (std::size_t i = 0; i < sourceLength.FinitePart(); ++i) {
-				if (predicate_(source_->Get(i))) {
-					++count;
-				}
-			}
-			return Ordinal::Finite(count);
-		}
-
-		bool HasNext(Ordinal nextIndex) const override {
-			return GetLength().ContainsIndex(nextIndex);
-		}
-
-		T GetNext(Ordinal nextIndex) override {
-			if (!nextIndex.IsFinite()) {
-				throw std::logic_error("Where generator supports only finite indexes");
-			}
-			Ordinal sourceLength = source_->GetLength();
-			while (sourceLength.IsInfinite() || sourceIndex_ < sourceLength.FinitePart()) {
-				T current = source_->Get(sourceIndex_);
-				++sourceIndex_;
-				if (predicate_(current)) {
-					return current;
-				}
-			}
-			throw std::out_of_range("No next element satisfies predicate");
-		}
-	};
-
-	template<class U>
-	friend class LazySequence;
 };
 
 #endif

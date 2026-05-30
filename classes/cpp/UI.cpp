@@ -205,7 +205,7 @@ namespace {
 			if (i != 0) {
 				std::cout << ' ';
 			}
-			std::cout << sequence.Get(i);
+			std::cout << sequence.Get(Ordinal::Finite(i));
 		}
 		std::cout << "\nДлина: " << FormatLength(sequence.GetLength());
 		std::cout << "\nМатериализовано: " << sequence.GetMaterializedCount() << "\n";
@@ -754,7 +754,7 @@ namespace {
 	void RunAutomaticChecks() {
 		int items[] = {1, 2, 3};
 		LazySequence<int> sequence(items, 3);
-		if (sequence.Get(1) != 2 || sequence.GetMaterializedCount() != 2) {
+		if (sequence.Get(Ordinal::Finite(1)) != 2 || sequence.GetMaterializedCount() != 2) {
 			throw std::runtime_error("Не пройдена проверка материализации");
 		}
 		auto changed = sequence.Prepend(0)->Append(4);
