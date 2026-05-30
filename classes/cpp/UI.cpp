@@ -44,14 +44,10 @@ namespace {
 		return value;
 	}
 
-	std::string FormatLength(Ordinal length) {
-		return length.ToString();
-	}
-
 	Ordinal ReadOrdinal(const std::string &prompt) {
 		std::cout << prompt << "\n";
-		std::size_t omegaCoefficient = ReadValue<std::size_t>("Коэффициент при omega: ");
-		std::size_t finitePart = ReadValue<std::size_t>("Конечная часть: ");
+		auto omegaCoefficient = ReadValue<std::size_t>("Коэффициент при omega: ");
+		auto finitePart = ReadValue<std::size_t>("Конечная часть: ");
 		return Ordinal::FromParts(omegaCoefficient, finitePart);
 	}
 
@@ -67,7 +63,7 @@ namespace {
 
 	MutableArraySequence<Number> ReadItems() {
 		MutableArraySequence<Number> result;
-		std::size_t count = ReadValue<std::size_t>("Количество элементов: ");
+		auto count = ReadValue<std::size_t>("Количество элементов: ");
 		for (std::size_t i = 0; i < count; ++i) {
 			result.Append(ReadValue<Number>("Элемент[" + std::to_string(i) + "] = "));
 		}
@@ -106,6 +102,69 @@ namespace {
 		return Lazy::FromIndexFunction(std::move(rule), length);
 	}
 
+	std::unique_ptr<Lazy> CreateFibonacciLazy() {
+		Number seedsData[] = {0, 1};
+		MutableArraySequence<Number> seeds(seedsData, 2);
+		return std::make_unique<Lazy>(FibonacciRule, &seeds, ReadLength());
+	}
+
+	std::unique_ptr<Lazy> CreateArithmeticProgression() {
+		auto first = ReadValue<Number>("Первый элемент: ");
+		auto step = ReadValue<Number>("Шаг: ");
+		return CreateByIndexRule([first, step](std::size_t index) {
+			return first + step * static_cast<Number>(index);
+		});
+	}
+
+	std::unique_ptr<Lazy> CreateGeometricProgression() {
+		auto first = ReadValue<Number>("Первый элемент: ");
+		auto ratio = ReadValue<Number>("Знаменатель прогрессии: ");
+		MutableArraySequence<Number> seeds(&first, 1);
+		auto rule = [ratio](Sequence<Number> *prefix) {
+			std::size_t length = prefix->GetLength();
+			return SequenceAt(prefix, length - 1) * ratio;
+		};
+		return std::make_unique<Lazy>(std::function<Number(Sequence<Number> *)>(rule), &seeds, ReadLength());
+	}
+
+	std::unique_ptr<Lazy> CreateSquares() {
+		return CreateByIndexRule([](std::size_t index) {
+			auto n = static_cast<Number>(index + 1);
+			return n * n;
+		});
+	}
+
+	std::unique_ptr<Lazy> CreateCubes() {
+		return CreateByIndexRule([](std::size_t index) {
+			auto n = static_cast<Number>(index + 1);
+			return n * n * n;
+		});
+	}
+
+	std::unique_ptr<Lazy> CreateFactorials() {
+		Number first = 1;
+		MutableArraySequence<Number> seeds(&first, 1);
+		auto rule = [](Sequence<Number> *prefix) {
+			std::size_t length = prefix->GetLength();
+			return SequenceAt(prefix, length - 1) * static_cast<Number>(length + 1);
+		};
+		return std::make_unique<Lazy>(std::function<Number(Sequence<Number> *)>(rule), &seeds, ReadLength());
+	}
+
+	std::unique_ptr<Lazy> CreateLinearFormula() {
+		auto a = ReadValue<Number>("a = ");
+		auto b = ReadValue<Number>("b = ");
+		return CreateByIndexRule([a, b](std::size_t index) {
+			return a * static_cast<Number>(index) + b;
+		});
+	}
+
+	std::unique_ptr<Lazy> CreateNaturalNumbers() {
+		return CreateByIndexRule([](std::size_t index) {
+			return static_cast<Number>(index + 1);
+		});
+	}
+
 	std::unique_ptr<Lazy> CreateGeneratedLazy() {
 		std::cout << "\nГенератор ленивой последовательности\n";
 		std::cout << "1. Числа Фибоначчи\n";
@@ -116,64 +175,26 @@ namespace {
 		std::cout << "6. Факториалы\n";
 		std::cout << "7. Линейная формула a*n + b\n";
 		std::cout << "8. Натуральные числа\n";
-		int choice = ReadValue<int>("Выбор: ");
-
-		if (choice == 1) {
-			Number seedsData[] = {0, 1};
-			MutableArraySequence<Number> seeds(seedsData, 2);
-			return std::make_unique<Lazy>(FibonacciRule, &seeds, ReadLength());
+		switch (ReadValue<int>("Выбор: ")) {
+			case 1:
+				return CreateFibonacciLazy();
+			case 2:
+				return CreateArithmeticProgression();
+			case 3:
+				return CreateGeometricProgression();
+			case 4:
+				return CreateSquares();
+			case 5:
+				return CreateCubes();
+			case 6:
+				return CreateFactorials();
+			case 7:
+				return CreateLinearFormula();
+			case 8:
+				return CreateNaturalNumbers();
+			default:
+				throw std::invalid_argument("Неизвестный генератор");
 		}
-		if (choice == 2) {
-			Number first = ReadValue<Number>("Первый элемент: ");
-			Number step = ReadValue<Number>("Шаг: ");
-			return CreateByIndexRule([first, step](std::size_t index) {
-				return first + step * static_cast<Number>(index);
-			});
-		}
-		if (choice == 3) {
-			Number first = ReadValue<Number>("Первый элемент: ");
-			Number ratio = ReadValue<Number>("Знаменатель прогрессии: ");
-			MutableArraySequence<Number> seeds(&first, 1);
-			auto rule = [ratio](Sequence<Number> *prefix) {
-				std::size_t length = prefix->GetLength();
-				return SequenceAt(prefix, length - 1) * ratio;
-			};
-			return std::make_unique<Lazy>(std::function<Number(Sequence<Number> *)>(rule), &seeds, ReadLength());
-		}
-		if (choice == 4) {
-			return CreateByIndexRule([](std::size_t index) {
-				Number n = static_cast<Number>(index + 1);
-				return n * n;
-			});
-		}
-		if (choice == 5) {
-			return CreateByIndexRule([](std::size_t index) {
-				Number n = static_cast<Number>(index + 1);
-				return n * n * n;
-			});
-		}
-		if (choice == 6) {
-			Number first = 1;
-			MutableArraySequence<Number> seeds(&first, 1);
-			auto rule = [](Sequence<Number> *prefix) {
-				std::size_t length = prefix->GetLength();
-				return SequenceAt(prefix, length - 1) * static_cast<Number>(length + 1);
-			};
-			return std::make_unique<Lazy>(std::function<Number(Sequence<Number> *)>(rule), &seeds, ReadLength());
-		}
-		if (choice == 7) {
-			Number a = ReadValue<Number>("a = ");
-			Number b = ReadValue<Number>("b = ");
-			return CreateByIndexRule([a, b](std::size_t index) {
-				return a * static_cast<Number>(index) + b;
-			});
-		}
-		if (choice == 8) {
-			return CreateByIndexRule([](std::size_t index) {
-				return static_cast<Number>(index + 1);
-			});
-		}
-		throw std::invalid_argument("Неизвестный генератор");
 	}
 
 	std::unique_ptr<Lazy> CreateLazyOperand() {
@@ -190,28 +211,7 @@ namespace {
 		throw std::invalid_argument("Неизвестный тип последовательности");
 	}
 
-	std::size_t PrefixCount(const Lazy &sequence) {
-		std::size_t requested = ReadValue<std::size_t>("Сколько элементов вывести: ");
-		Ordinal length = sequence.GetLength();
-		if (length.IsFinite() && requested > length.FinitePart()) {
-			return length.FinitePart();
-		}
-		return requested;
-	}
-
-	void PrintLazyPrefix(const Lazy &sequence, std::size_t count) {
-		std::cout << "Элементы: ";
-		for (std::size_t i = 0; i < count; ++i) {
-			if (i != 0) {
-				std::cout << ' ';
-			}
-			std::cout << sequence.Get(Ordinal::Finite(i));
-		}
-		std::cout << "\nДлина: " << FormatLength(sequence.GetLength());
-		std::cout << "\nМатериализовано: " << sequence.GetMaterializedCount() << "\n";
-	}
-
-	void PrintFiniteSequence(Sequence<Number> &sequence) {
+	void PrintFiniteSequence(const Sequence<Number> &sequence) {
 		std::unique_ptr<IEnumerator<Number> > enumerator(sequence.GetEnumerator());
 		std::cout << "Элементы: ";
 		bool first = true;
@@ -233,11 +233,11 @@ namespace {
 		if (choice == 1) {
 			sequence = sequence->Map<Number>([](Number x) { return x * x; });
 		} else if (choice == 2) {
-			Number multiplier = ReadValue<Number>("Множитель: ");
+			auto multiplier = ReadValue<Number>("Множитель: ");
 			sequence = sequence->Map<Number>([multiplier](Number x) { return x * multiplier; });
 		} else if (choice == 3) {
-			Number a = ReadValue<Number>("a = ");
-			Number b = ReadValue<Number>("b = ");
+			auto a = ReadValue<Number>("a = ");
+			auto b = ReadValue<Number>("b = ");
 			sequence = sequence->Map<Number>([a, b](Number x) { return a * x + b; });
 		} else {
 			throw std::invalid_argument("Неизвестное преобразование");
@@ -255,10 +255,10 @@ namespace {
 		} else if (choice == 2) {
 			sequence = sequence->Where([](Number x) { return x % 2 != 0; });
 		} else if (choice == 3) {
-			Number bound = ReadValue<Number>("Граница: ");
+			auto bound = ReadValue<Number>("Граница: ");
 			sequence = sequence->Where([bound](Number x) { return x > bound; });
 		} else if (choice == 4) {
-			Number divisor = ReadValue<Number>("Делитель: ");
+			auto divisor = ReadValue<Number>("Делитель: ");
 			if (divisor == 0) {
 				throw std::invalid_argument("Делитель не может быть нулём");
 			}
@@ -296,7 +296,7 @@ namespace {
 	}
 
 	void EnumerateCurrent(const Lazy &sequence) {
-		std::size_t count = ReadValue<std::size_t>("Сколько элементов перечислить: ");
+		auto count = ReadValue<std::size_t>("Сколько элементов перечислить: ");
 		auto enumerator = sequence.GetEnumerator();
 		std::cout << "Перечислитель: ";
 		for (std::size_t i = 0; i < count && enumerator->MoveNext(); ++i) {
@@ -325,7 +325,7 @@ namespace {
 			}
 			try {
 				if (choice == 1) {
-					std::cout << "Длина: " << FormatLength(sequence->GetLength()) << "\n";
+					std::cout << "Длина: " << sequence->GetLength().ToString() << "\n";
 					std::cout << "Материализовано: " << sequence->GetMaterializedCount() << "\n";
 				} else if (choice == 2) {
 					std::cout << "Первый элемент: " << sequence->GetFirst() << "\n";
@@ -334,8 +334,8 @@ namespace {
 					Ordinal index = ReadOrdinal("Индекс");
 					std::cout << "Значение: " << sequence->Get(index) << "\n";
 				} else if (choice == 4) {
-					std::size_t start = ReadValue<std::size_t>("Начальный индекс: ");
-					std::size_t end = ReadValue<std::size_t>("Конечный индекс: ");
+					auto start = ReadValue<std::size_t>("Начальный индекс: ");
+					auto end = ReadValue<std::size_t>("Конечный индекс: ");
 					sequence = sequence->GetSubsequence(Ordinal::Finite(start), Ordinal::Finite(end));
 					std::cout << "Подпоследовательность стала текущей.\n";
 				}else if (choice == 5) {
@@ -370,7 +370,7 @@ namespace {
 		}
 	}
 
-	void PrintReadStreamStatus(ReadOnlyStream<Number> &stream) {
+	void PrintReadStreamStatus(const ReadOnlyStream<Number> &stream) {
 		std::cout << "Позиция: " << stream.GetPosition();
 		std::cout << ", конец потока: " << (stream.IsEndOfStream() ? "да" : "нет");
 		std::cout << ", поддерживает Seek: " << (stream.IsCanSeek() ? "да" : "нет");
@@ -650,13 +650,13 @@ namespace {
 	}
 
 	std::unique_ptr<LazySequence<Event> > ReadManualEvents() {
-		std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+		auto count = ReadValue<std::size_t>("Количество событий: ");
 		MutableArraySequence<Event> events;
 		for (std::size_t i = 0; i < count; ++i) {
 			std::cout << "\nСобытие #" << (i + 1) << "\n";
 			EventType type = ReadEventType();
-			long long timestamp = ReadValue<long long>("Время: ");
-			double value = ReadValue<double>("Значение: ");
+			auto timestamp = ReadValue<long long>("Время: ");
+			auto value = ReadValue<double>("Значение: ");
 			std::string source = ReadLine("Источник: ");
 			events.Append(Event{i + 1, timestamp, type, value, source});
 		}
@@ -679,11 +679,11 @@ namespace {
 		return std::make_unique<LazySequence<Event> >(static_cast<const Sequence<Event> &>(events));
 	}
 
-	void RunForecastScenario(std::unique_ptr<LazySequence<Event> > events, const ForecastSettings &settings) {
+	void RunForecastScenario(const std::unique_ptr<LazySequence<Event> > &events, const ForecastSettings &settings) {
 		std::size_t available = events->GetLength().IsFinite()
 			                        ? events->GetLength().FinitePart()
 			                        : ReadValue<std::size_t>("Количество обрабатываемых событий: ");
-		std::size_t count = ReadValue<std::size_t>("Сколько событий обработать (не более доступных): ");
+		auto count = ReadValue<std::size_t>("Сколько событий обработать (не более доступных): ");
 		if (count > available) {
 			count = available;
 		}
@@ -715,29 +715,29 @@ namespace {
 					RunForecastScenario(ReadManualEvents(), settings);
 				} else if (choice == 3) {
 					EventType type = ReadEventType();
-					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
-					double first = ReadValue<double>("Первое значение: ");
-					double step = ReadValue<double>("Шаг: ");
+					auto count = ReadValue<std::size_t>("Количество событий: ");
+					auto first = ReadValue<double>("Первое значение: ");
+					auto step = ReadValue<double>("Шаг: ");
 					RunForecastScenario(EventGenerator::Linear(type, count, first, step, "linear"), settings);
 				} else if (choice == 4) {
 					EventType type = ReadEventType();
-					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
-					double first = ReadValue<double>("Первое значение: ");
-					double step = ReadValue<double>("Шаг до скачка: ");
-					std::size_t spike = ReadValue<std::size_t>("Индекс скачка (с нуля): ");
-					double spikeValue = ReadValue<double>("Значение скачка: ");
+					auto count = ReadValue<std::size_t>("Количество событий: ");
+					auto first = ReadValue<double>("Первое значение: ");
+					auto step = ReadValue<double>("Шаг до скачка: ");
+					auto spike = ReadValue<std::size_t>("Индекс скачка (с нуля): ");
+					auto spikeValue = ReadValue<double>("Значение скачка: ");
 					RunForecastScenario(EventGenerator::WithSpike(type, count, first, step, spike,
 					                                             spikeValue, "spike"), settings);
 				} else if (choice == 5) {
 					EventType type = ReadEventType();
-					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
-					double base = ReadValue<double>("Базовое значение: ");
-					double amplitude = ReadValue<double>("Амплитуда шума: ");
+					auto count = ReadValue<std::size_t>("Количество событий: ");
+					auto base = ReadValue<double>("Базовое значение: ");
+					auto amplitude = ReadValue<double>("Амплитуда шума: ");
 					RunForecastScenario(EventGenerator::Noise(type, count, base, amplitude, "noise"), settings);
 				} else if (choice == 6) {
 					RunForecastScenario(ReadEventsFromFile(), settings);
 				} else if (choice == 7) {
-					std::size_t count = ReadValue<std::size_t>("Количество событий: ");
+					auto count = ReadValue<std::size_t>("Количество событий: ");
 					std::size_t spike = count / 2;
 					ProcessEventScenario(*EventGenerator::WithSpike(EventType::CpuLoad, count, 20.0, 0.01,
 					                                                spike, 95.0, "large"),
@@ -751,26 +751,8 @@ namespace {
 		}
 	}
 
-	void RunAutomaticChecks() {
-		int items[] = {1, 2, 3};
-		LazySequence<int> sequence(items, 3);
-		if (sequence.Get(Ordinal::Finite(1)) != 2 || sequence.GetMaterializedCount() != 2) {
-			throw std::runtime_error("Не пройдена проверка материализации");
-		}
-		auto changed = sequence.Prepend(0)->Append(4);
-		if (changed->GetFirst() != 0 || changed->GetLast() != 4) {
-			throw std::runtime_error("Не пройдена проверка операций");
-		}
-		StringReadStream<int> stream("7 8", DeserializeInt);
-		stream.Open();
-		if (stream.Read() != 7 || stream.Read() != 8) {
-			throw std::runtime_error("Не пройдена проверка потоков");
-		}
-		std::cout << "Встроенные проверки UI успешно выполнены. Полный набор запускается через GoogleTest.\n";
-	}
-
 	void RunLazyLoadTest() {
-		std::size_t count = ReadValue<std::size_t>("Сколько натуральных чисел обработать: ");
+		auto count = ReadValue<std::size_t>("Сколько натуральных чисел обработать: ");
 		auto sequence = Lazy::Infinite([](std::size_t index) { return static_cast<Number>(index + 1); });
 		LazySequenceReadStream<Number> stream(*sequence);
 		stream.Open();
@@ -788,7 +770,7 @@ namespace {
 	}
 
 	void RunFileLoadTest() {
-		std::size_t count = ReadValue<std::size_t>("Сколько чисел записать и прочитать: ");
+		auto count = ReadValue<std::size_t>("Сколько чисел записать и прочитать: ");
 		const std::string filename = "ui_file_stream_load_test.tmp";
 		FileWriteStream<Number> writer(filename, [](const Number &value) { return std::to_string(value); });
 		auto start = std::chrono::steady_clock::now();
@@ -824,7 +806,6 @@ namespace {
 		std::cout << "5. Поток чтения строки\n";
 		std::cout << "6. Поток записи в последовательность\n";
 		std::cout << "7. Файловые потоки\n";
-		std::cout << "8. Встроенные автоматические проверки\n";
 		std::cout << "9. Нагрузочная проверка LazySequence\n";
 		std::cout << "10. Нагрузочная проверка файловых потоков\n";
 		std::cout << "11. Вариант 3.3: прогноз / коррекция событий\n";
@@ -851,9 +832,7 @@ void RunTestingUi() {
 				SequenceWritePanel();
 			} else if (choice == 7) {
 				FileStreamsPanel();
-			} else if (choice == 8) {
-				RunAutomaticChecks();
-			} else if (choice == 9) {
+			}else if (choice == 9) {
 				RunLazyLoadTest();
 			} else if (choice == 10) {
 				RunFileLoadTest();
