@@ -8,9 +8,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
-#include "Cardinal.h"
+#include "Ordinal.h"
 #include "LazySequence.h"
 #include "MutableArraySequence.h"
 
@@ -141,19 +140,19 @@ public:
 		events_.Append(event);
 	}
 
-	std::size_t GetLength() const {
+	[[nodiscard]] std::size_t GetLength() const {
 		return events_.GetLength();
 	}
 
-	std::size_t GetMaxSize() const {
+	[[nodiscard]] std::size_t GetMaxSize() const {
 		return maxSize_;
 	}
 
-	bool CanPredict(std::size_t minimumCount) const {
+	[[nodiscard]] bool CanPredict(std::size_t minimumCount) const {
 		return events_.GetLength() >= minimumCount;
 	}
 
-	Event Get(std::size_t index) const {
+	[[nodiscard]] Event Get(std::size_t index) const {
 		return events_.Get(index);
 	}
 
@@ -176,11 +175,11 @@ public:
 		}
 	}
 
-	std::size_t GetOrder() const {
+	[[nodiscard]] std::size_t GetOrder() const {
 		return order_;
 	}
 
-	Prediction PredictNext(const HistoryBuffer &history, EventType type) const {
+	[[nodiscard]] Prediction PredictNext(const HistoryBuffer &history, EventType type) const {
 		std::size_t requiredCount = order_ + 1;
 		if (!history.CanPredict(requiredCount)) {
 			return Prediction{false, type, 0.0, 0.0};
@@ -215,7 +214,7 @@ public:
 		}
 	}
 
-	Correction Compare(const Prediction &prediction, const Event &actual) const {
+	[[nodiscard]] Correction Compare(const Prediction &prediction, const Event &actual) const {
 		if (!prediction.hasPrediction || prediction.type != actual.type) {
 			return Correction{};
 		}
@@ -234,7 +233,7 @@ public:
 
 class DecisionMaker {
 public:
-	Reaction MakeReaction(const Event &, const Correction &correction) const {
+	static Reaction MakeReaction(const Event &, const Correction &correction) {
 		if (!correction.hasCorrection) {
 			return Reaction{ReactionType::NoPrediction, "Недостаточно данных для прогноза"};
 		}
@@ -276,7 +275,7 @@ public:
 		std::size_t typeIndex = EventTypeIndex(event.type);
 		Prediction previousPrediction = pendingPredictions_[typeIndex];
 		Correction correction = correctionService_.Compare(previousPrediction, event);
-		Reaction reaction = decisionMaker_.MakeReaction(event, correction);
+		Reaction reaction = DecisionMaker::MakeReaction(event, correction);
 
 		histories_[typeIndex].Add(event);
 		Prediction nextPrediction = model_.PredictNext(histories_[typeIndex], event.type);
@@ -285,11 +284,11 @@ public:
 		return ProcessingResult{event, previousPrediction, correction, reaction, nextPrediction};
 	}
 
-	const HistoryBuffer &GetHistory(EventType type) const {
+	[[nodiscard]] const HistoryBuffer &GetHistory(EventType type) const {
 		return histories_[EventTypeIndex(type)];
 	}
 
-	Prediction GetPendingPrediction(EventType type) const {
+	[[nodiscard]] Prediction GetPendingPrediction(EventType type) const {
 		return pendingPredictions_[EventTypeIndex(type)];
 	}
 };
@@ -334,18 +333,18 @@ public:
 		}
 	}
 
-	std::size_t GetTotal() const { return total_; }
-	std::size_t GetNormalCount() const { return normal_; }
-	std::size_t GetWarningCount() const { return warning_; }
-	std::size_t GetCriticalCount() const { return critical_; }
-	std::size_t GetNoPredictionCount() const { return noPrediction_; }
+	[[nodiscard]] std::size_t GetTotal() const { return total_; }
+	[[nodiscard]] std::size_t GetNormalCount() const { return normal_; }
+	[[nodiscard]] std::size_t GetWarningCount() const { return warning_; }
+	[[nodiscard]] std::size_t GetCriticalCount() const { return critical_; }
+	[[nodiscard]] std::size_t GetNoPredictionCount() const { return noPrediction_; }
 
-	double GetMeanAbsoluteError() const {
+	[[nodiscard]] double GetMeanAbsoluteError() const {
 		std::size_t corrected = total_ - noPrediction_;
 		return corrected == 0 ? 0.0 : absoluteErrorSum_ / static_cast<double>(corrected);
 	}
 
-	double GetMaximumAbsoluteError() const {
+	[[nodiscard]] double GetMaximumAbsoluteError() const {
 		return maximumAbsoluteError_;
 	}
 };
@@ -359,17 +358,17 @@ private:
 public:
 	static std::unique_ptr<LazySequence<Event> > Linear(EventType type, std::size_t count,
 	                                                    double firstValue, double step,
-	                                                    std::string source = "generated") {
+	                                                    const std::string& source = "generated") {
 		auto rule = [type, firstValue, step, source](std::size_t index) {
 			return MakeEvent(index, type, firstValue + step * static_cast<double>(index), source);
 		};
-		return LazySequence<Event>::FromIndexFunction(rule, Cardinal::Finite(count));
+		return LazySequence<Event>::FromIndexFunction(rule, Ordinal::Finite(count));
 	}
 
 	static std::unique_ptr<LazySequence<Event> > WithSpike(EventType type, std::size_t count,
 	                                                       double firstValue, double step,
 	                                                       std::size_t spikeIndex, double spikeValue,
-	                                                       std::string source = "generated") {
+	                                                       const std::string& source = "generated") {
 		auto rule = [type, firstValue, step, spikeIndex, spikeValue, source](std::size_t index) {
 			double value = firstValue + step * static_cast<double>(index);
 			if (index == spikeIndex) {
@@ -377,18 +376,18 @@ public:
 			}
 			return MakeEvent(index, type, value, source);
 		};
-		return LazySequence<Event>::FromIndexFunction(rule, Cardinal::Finite(count));
+		return LazySequence<Event>::FromIndexFunction(rule, Ordinal::Finite(count));
 	}
 
 	static std::unique_ptr<LazySequence<Event> > Noise(EventType type, std::size_t count,
 	                                                   double baseValue, double amplitude,
-	                                                   std::string source = "generated") {
+	                                                   const std::string& source = "generated") {
 		auto rule = [type, baseValue, amplitude, source](std::size_t index) {
 			int offset = static_cast<int>(index % 5) - 2;
 			double value = baseValue + amplitude * static_cast<double>(offset);
 			return MakeEvent(index, type, value, source);
 		};
-		return LazySequence<Event>::FromIndexFunction(rule, Cardinal::Finite(count));
+		return LazySequence<Event>::FromIndexFunction(rule, Ordinal::Finite(count));
 	}
 };
 
