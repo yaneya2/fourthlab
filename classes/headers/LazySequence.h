@@ -802,7 +802,7 @@ public:
 				if (!currentValid_ || index_ == 0) {
 					throw std::out_of_range("Enumerator out of range");
 				}
-			return sequence_->Get(Ordinal::Finite(index_ - 1));
+				return sequence_->Get(Ordinal::Finite(index_ - 1));
 			}
 
 			void Reset() override {
