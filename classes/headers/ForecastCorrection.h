@@ -1,7 +1,6 @@
 #ifndef FOURTHLAB_FORECAST_CORRECTION_H
 #define FOURTHLAB_FORECAST_CORRECTION_H
 
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -249,19 +248,21 @@ public:
 
 class ForecastCorrectionProcessor {
 private:
-	std::array<HistoryBuffer, 4> histories_;
+	MutableArraySequence<std::shared_ptr<HistoryBuffer> > histories_;
 	DifferenceForecastModel model_;
 	CorrectionService correctionService_;
 	DecisionMaker decisionMaker_;
-	std::array<Prediction, 4> pendingPredictions_;
+	MutableArraySequence<Prediction> pendingPredictions_;
+
+	void SetPendingPrediction(std::size_t index, const Prediction &prediction) {
+		pendingPredictions_.Del(index);
+		pendingPredictions_.InsertAt(prediction, index);
+	}
 
 public:
 	ForecastCorrectionProcessor(std::size_t order, std::size_t historySize,
 	                            double warningThreshold, double criticalThreshold)
-		: histories_{
-			  HistoryBuffer(historySize), HistoryBuffer(historySize),
-			  HistoryBuffer(historySize), HistoryBuffer(historySize)
-		  },
+		: histories_(),
 		  model_(order),
 		  correctionService_(warningThreshold, criticalThreshold),
 		  decisionMaker_(),
@@ -269,27 +270,33 @@ public:
 		if (historySize < order + 1) {
 			throw std::invalid_argument("History size is too small for forecast order");
 		}
+
+		for (std::size_t i = 0; i < 4; ++i) {
+			histories_.Append(std::shared_ptr<HistoryBuffer>(new HistoryBuffer(historySize)));
+			pendingPredictions_.Append(Prediction{});
+		}
 	}
 
 	ProcessingResult Process(const Event &event) {
 		std::size_t typeIndex = EventTypeIndex(event.type);
-		Prediction previousPrediction = pendingPredictions_[typeIndex];
+		Prediction previousPrediction = pendingPredictions_.Get(typeIndex);
 		Correction correction = correctionService_.Compare(previousPrediction, event);
 		Reaction reaction = DecisionMaker::MakeReaction(event, correction);
 
-		histories_[typeIndex].Add(event);
-		Prediction nextPrediction = model_.PredictNext(histories_[typeIndex], event.type);
-		pendingPredictions_[typeIndex] = nextPrediction;
+		std::shared_ptr<HistoryBuffer> history = histories_.Get(typeIndex);
+		history->Add(event);
+		Prediction nextPrediction = model_.PredictNext(*history, event.type);
+		SetPendingPrediction(typeIndex, nextPrediction);
 
 		return ProcessingResult{event, previousPrediction, correction, reaction, nextPrediction};
 	}
 
 	[[nodiscard]] const HistoryBuffer &GetHistory(EventType type) const {
-		return histories_[EventTypeIndex(type)];
+		return *histories_.Get(EventTypeIndex(type));
 	}
 
 	[[nodiscard]] Prediction GetPendingPrediction(EventType type) const {
-		return pendingPredictions_[EventTypeIndex(type)];
+		return pendingPredictions_.Get(EventTypeIndex(type));
 	}
 };
 

@@ -1,5 +1,4 @@
 #include "classes/headers/UI.h"
-
 #include <windows.h>
 
 int main() {
