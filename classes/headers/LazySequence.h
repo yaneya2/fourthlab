@@ -211,17 +211,6 @@ private:
 		}
 	};
 
-	static bool CanAddOne(std::size_t value) {
-		return value < std::numeric_limits<std::size_t>::max();
-	}
-
-	static Ordinal AddOneToFinitePart(Ordinal value) {
-		if (!CanAddOne(value.FinitePart())) {
-			throw std::overflow_error("Ordinal finite part addition overflow");
-		}
-		return Ordinal::FromParts(value.OmegaCoefficient(), value.FinitePart() + 1);
-	}
-
 	static Ordinal solveNewLength(Ordinal index, Ordinal prefixLength, bool includeRightBound = false) {
 		if (index < prefixLength) {
 			throw std::out_of_range("Invalid ordinal subtraction");
@@ -238,7 +227,7 @@ private:
 		} else {
 			result = Ordinal::FromParts(index.OmegaCoefficient() - prefixLength.OmegaCoefficient(), index.FinitePart());
 		}
-		return includeRightBound ? AddOneToFinitePart(result) : result;
+		return includeRightBound ? Ordinal(result.OmegaCoefficient(), result.FinitePart() + 1) : result;
 	}
 
 	class PrependGenerator : public Generator {
