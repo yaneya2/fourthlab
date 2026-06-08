@@ -12,7 +12,6 @@
 - `Ordinal::Finite(n)` - конечное значение;
 - `Ordinal::Omega()` - бесконечная длина;
 - `Ordinal::FromParts(omegaCoefficient, finitePart)` - значение вида `omega * k + n`;
-- `ContainsIndex` - проверка, входит ли индекс в длину;
 - `ToString` - текстовое представление длины;
 - сравнение и сложение ординалов.
 
@@ -218,6 +217,8 @@ fourthlab/
 |   |   `-- UI.cpp
 |   `-- headers/
 |       |-- ArraySequence.h
+|       |-- LazySequenceGenerators
+|       |-- Generator
 |       |-- DynamicArray.h
 |       |-- ForecastCorrection.h
 |       |-- IEnumerator.h

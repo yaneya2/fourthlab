@@ -22,6 +22,8 @@ set(FOURTHLAB_HEADERS
         classes/headers/Sequence.h
         classes/headers/Streams.h
         classes/headers/UI.h
+        classes/headers/Generator.h
+        classes/headers/LazySequenceGenerators.h
 )
 
 add_executable(fourthlab

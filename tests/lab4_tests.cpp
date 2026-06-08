@@ -61,14 +61,14 @@ TEST(Ordinal, FiniteAndOmegaBehaveAsOrderedOrdinals) {
 	Ordinal omega = Ordinal::Omega();
 
 	EXPECT_TRUE(zero.IsFinite());
-	EXPECT_EQ(zero.FinitePart(), static_cast<std::size_t>(0));
+	EXPECT_EQ(zero.FinitePart(), 0);
 	EXPECT_TRUE(omega.IsOmega());
 	EXPECT_TRUE(omega.IsInfinite());
-	EXPECT_EQ(omega.FinitePart(), static_cast<std::size_t>(0));
+	EXPECT_EQ(omega.FinitePart(), 0);
 
-	EXPECT_TRUE(three.ContainsIndex(2));
-	EXPECT_FALSE(three.ContainsIndex(3));
-	EXPECT_TRUE(omega.ContainsIndex(std::numeric_limits<std::size_t>::max()));
+	EXPECT_TRUE(Ordinal::Finite(2) < three);
+	EXPECT_FALSE(Ordinal::Finite(3) < three);
+	EXPECT_TRUE(Ordinal::Finite(std::numeric_limits<std::size_t>::max()) < omega);
 
 	EXPECT_EQ(three + Ordinal::Finite(2), five);
 	EXPECT_TRUE((three + omega).IsInfinite());
@@ -90,8 +90,8 @@ TEST(Ordinal, RepresentsOmegaCoefficientAndFinitePart) {
 	Ordinal omegaTwicePlusThree = Ordinal::FromParts(2, 3);
 	Ordinal omegaPlusFive = Ordinal::FromParts(1, 5);
 
-	EXPECT_EQ(omegaTwicePlusThree.OmegaCoefficient(), static_cast<std::size_t>(2));
-	EXPECT_EQ(omegaTwicePlusThree.FinitePart(), static_cast<std::size_t>(3));
+	EXPECT_EQ(omegaTwicePlusThree.OmegaCoefficient(), 2);
+	EXPECT_EQ(omegaTwicePlusThree.FinitePart(), 3);
 	EXPECT_FALSE(omegaTwicePlusThree.IsOmega());
 	EXPECT_TRUE(omegaTwicePlusThree.IsInfinite());
 	EXPECT_EQ(Ordinal::Finite(7).ToString(), "7");
@@ -110,9 +110,9 @@ TEST(LazySequence, ArrayMaterializationIsLazy) {
 	LazySequence<int> sequence(items, 3);
 
 	EXPECT_EQ(sequence.GetLength(), Ordinal::Finite(3));
-	EXPECT_EQ(sequence.GetMaterializedCount(), static_cast<std::size_t>(0));
+	EXPECT_EQ(sequence.GetMaterializedCount(), 0);
 	EXPECT_EQ(sequence.Get(Ordinal::Finite(1)), 20);
-	EXPECT_EQ(sequence.GetMaterializedCount(), static_cast<std::size_t>(2));
+	EXPECT_EQ(sequence.GetMaterializedCount(), 2);
 	EXPECT_EQ(sequence.GetLast(), 30);
 	EXPECT_THROW(sequence.Get(Ordinal::Finite(3)), std::out_of_range);
 }
@@ -121,7 +121,7 @@ TEST(LazySequence, EmptySequenceRejectsElementAccess) {
 	LazySequence<int> empty;
 
 	EXPECT_EQ(empty.GetLength(), Ordinal::Finite(0));
-	EXPECT_EQ(empty.GetMaterializedCount(), static_cast<std::size_t>(0));
+	EXPECT_EQ(empty.GetMaterializedCount(), 0);
 	EXPECT_THROW(empty.GetFirst(), std::out_of_range);
 	EXPECT_THROW(empty.GetLast(), std::out_of_range);
 	EXPECT_THROW(empty.Get(Ordinal::Finite(0)), std::out_of_range);
@@ -206,7 +206,7 @@ TEST(LazySequence, InfiniteAndRecurrence) {
 	MutableArraySequence<int> seeds(seedItems, 2);
 	LazySequence<int> fibonacci(FibonacciRule, &seeds);
 	EXPECT_EQ(fibonacci.Get(Ordinal::Finite(10)), 55);
-	EXPECT_EQ(fibonacci.GetMaterializedCount(), static_cast<std::size_t>(11));
+	EXPECT_EQ(fibonacci.GetMaterializedCount(), 11);
 }
 
 TEST(LazySequence, InfiniteAppendPrependAndConcatKeepOrdinalShape) {
@@ -288,10 +288,10 @@ TEST(LazySequence, TakeMaterializesRequestedPrefix) {
 
 	auto taken = sequence.Take(4);
 
-	ASSERT_EQ(taken->GetLength(), static_cast<std::size_t>(4));
+	ASSERT_EQ(taken->GetLength(), 4);
 	EXPECT_EQ(SequenceAt(taken.get(), 0), 10);
 	EXPECT_EQ(SequenceAt(taken.get(), 3), 40);
-	EXPECT_EQ(sequence.GetMaterializedCount(), static_cast<std::size_t>(4));
+	EXPECT_EQ(sequence.GetMaterializedCount(), 4);
 }
 
 TEST(Streams, SequenceAndLazySequenceReadStreams) {
@@ -302,7 +302,7 @@ TEST(Streams, SequenceAndLazySequenceReadStreams) {
 	EXPECT_THROW(sequenceStream.Read(), StreamException);
 	sequenceStream.Open();
 	EXPECT_EQ(sequenceStream.Read(), 7);
-	EXPECT_EQ(sequenceStream.Seek(1), static_cast<std::size_t>(1));
+	EXPECT_EQ(sequenceStream.Seek(1), 1);
 	EXPECT_EQ(sequenceStream.Read(), 8);
 	sequenceStream.Close();
 
@@ -311,7 +311,7 @@ TEST(Streams, SequenceAndLazySequenceReadStreams) {
 	LazySequenceReadStream<int> lazyStream(lazy);
 	lazyStream.Open();
 	EXPECT_EQ(lazyStream.Read(), 1);
-	EXPECT_EQ(lazyStream.Seek(2), static_cast<std::size_t>(2));
+	EXPECT_EQ(lazyStream.Seek(2), 2);
 	EXPECT_EQ(lazyStream.Read(), 3);
 	EXPECT_THROW(lazyStream.Read(), EndOfStream);
 	lazyStream.Close();
@@ -323,7 +323,7 @@ TEST(Streams, ReadStreamsValidateStateSeekingAndSharedSources) {
 
 	SequenceReadStream<int> sequenceStream(sharedSequence);
 	sequenceStream.Open();
-	EXPECT_EQ(sequenceStream.Seek(2), static_cast<std::size_t>(2));
+	EXPECT_EQ(sequenceStream.Seek(2), 2);
 	EXPECT_THROW(sequenceStream.Read(), EndOfStream);
 	EXPECT_THROW(sequenceStream.Seek(3), EndOfStream);
 	sequenceStream.Close();
@@ -335,7 +335,7 @@ TEST(Streams, ReadStreamsValidateStateSeekingAndSharedSources) {
 		new LazySequence<int>([](std::size_t index) { return static_cast<int>(index + 1); }, Ordinal::Finite(2)));
 	LazySequenceReadStream<int> lazyStream(sharedLazy);
 	lazyStream.Open();
-	EXPECT_EQ(lazyStream.Seek(2), static_cast<std::size_t>(2));
+	EXPECT_EQ(lazyStream.Seek(2),2);
 	EXPECT_THROW(lazyStream.Read(), EndOfStream);
 	EXPECT_THROW(lazyStream.Seek(3), EndOfStream);
 	lazyStream.Close();
@@ -348,16 +348,16 @@ TEST(Streams, StringAndSequenceWriteStreams) {
 	StringReadStream<int> stringStream("4 5 6", DeserializeInt);
 	stringStream.Open();
 	EXPECT_EQ(stringStream.Read(), 4);
-	EXPECT_EQ(stringStream.Seek(2), static_cast<std::size_t>(2));
+	EXPECT_EQ(stringStream.Seek(2), 2);
 	EXPECT_EQ(stringStream.Read(), 6);
 	stringStream.Close();
 
 	MutableArraySequence<int> destination;
 	SequenceWriteStream<int> writeStream(destination);
 	writeStream.Open();
-	EXPECT_EQ(writeStream.Write(11), static_cast<std::size_t>(1));
-	EXPECT_EQ(writeStream.Write(12), static_cast<std::size_t>(2));
-	EXPECT_EQ(destination.GetLength(), static_cast<std::size_t>(2));
+	EXPECT_EQ(writeStream.Write(11), 1);
+	EXPECT_EQ(writeStream.Write(12), 2);
+	EXPECT_EQ(destination.GetLength(), 2);
 	EXPECT_EQ(destination.Get(1), 12);
 	writeStream.Close();
 }
@@ -382,12 +382,12 @@ TEST(Streams, SequenceWriteStreamValidatesStateAndSharedDestination) {
 
 	EXPECT_THROW(stream.Write(10), StreamException);
 	stream.Open();
-	EXPECT_EQ(stream.Write(10), static_cast<std::size_t>(1));
-	EXPECT_EQ(stream.Write(20), static_cast<std::size_t>(2));
+	EXPECT_EQ(stream.Write(10),1);
+	EXPECT_EQ(stream.Write(20), 2);
 	stream.Close();
 	EXPECT_THROW(stream.Write(30), StreamException);
 
-	ASSERT_EQ(destination->GetLength(), static_cast<std::size_t>(2));
+	ASSERT_EQ(destination->GetLength(), 2);
 	EXPECT_EQ(SequenceAt(destination.get(), 0), 10);
 	EXPECT_EQ(SequenceAt(destination.get(), 1), 20);
 
@@ -477,7 +477,7 @@ TEST(ForecastCorrection, HistoryBufferKeepsOnlyLatestEvents) {
 	history.Add(Event{3, 3, EventType::CpuLoad, 30.0, "test"});
 	history.Add(Event{4, 4, EventType::CpuLoad, 40.0, "test"});
 
-	EXPECT_EQ(history.GetLength(), static_cast<std::size_t>(3));
+	EXPECT_EQ(history.GetLength(), 3);
 	EXPECT_DOUBLE_EQ(history.Get(0).value, 20.0);
 	EXPECT_DOUBLE_EQ(history.GetFromEnd(0).value, 40.0);
 	EXPECT_TRUE(history.CanPredict(3));
@@ -545,8 +545,8 @@ TEST(ForecastCorrection, ProcessorPredictsCorrectsAndSeparatesEventTypes) {
 	EXPECT_EQ(third.reaction.type, ReactionType::Warning);
 	EXPECT_DOUBLE_EQ(third.correction.error, 5.0);
 	EXPECT_DOUBLE_EQ(third.nextPrediction.predictedValue, 50.0);
-	EXPECT_EQ(processor.GetHistory(EventType::CpuLoad).GetLength(), static_cast<std::size_t>(3));
-	EXPECT_EQ(processor.GetHistory(EventType::MemoryLoad).GetLength(), static_cast<std::size_t>(1));
+	EXPECT_EQ(processor.GetHistory(EventType::CpuLoad).GetLength(), 3);
+	EXPECT_EQ(processor.GetHistory(EventType::MemoryLoad).GetLength(), 1);
 
 	EXPECT_THROW(ForecastCorrectionProcessor(2, 2, 5.0, 10.0), std::invalid_argument);
 }
@@ -569,10 +569,10 @@ TEST(ForecastCorrection, LazyEventGeneratorProcessesAndWritesResults) {
 	input.Close();
 	output.Close();
 
-	EXPECT_EQ(results.GetLength(), static_cast<std::size_t>(5));
-	EXPECT_EQ(statistics.GetTotal(), static_cast<std::size_t>(5));
-	EXPECT_EQ(statistics.GetCriticalCount(), static_cast<std::size_t>(2));
-	EXPECT_EQ(events->GetMaterializedCount(), static_cast<std::size_t>(5));
+	EXPECT_EQ(results.GetLength(), 5);
+	EXPECT_EQ(statistics.GetTotal(), 5);
+	EXPECT_EQ(statistics.GetCriticalCount(), 2);
+	EXPECT_EQ(events->GetMaterializedCount(),5);
 	EXPECT_EQ(results.Get(3).reaction.type, ReactionType::Critical);
 	EXPECT_NE(SerializeProcessingResult(results.Get(3)).find("CRITICAL"), std::string::npos);
 }
@@ -604,10 +604,10 @@ TEST(ForecastCorrection, ProcessesLargeLinearLazyEventStream) {
 	input.Close();
 
 	EXPECT_EQ(statistics.GetTotal(), count);
-	EXPECT_EQ(statistics.GetNoPredictionCount(), static_cast<std::size_t>(2));
+	EXPECT_EQ(statistics.GetNoPredictionCount(), 2);
 	EXPECT_EQ(statistics.GetNormalCount(), count - 2);
-	EXPECT_EQ(statistics.GetWarningCount(), static_cast<std::size_t>(0));
-	EXPECT_EQ(statistics.GetCriticalCount(), static_cast<std::size_t>(0));
+	EXPECT_EQ(statistics.GetWarningCount(),0);
+	EXPECT_EQ(statistics.GetCriticalCount(), 0);
 	EXPECT_DOUBLE_EQ(statistics.GetMaximumAbsoluteError(), 0.0);
 	EXPECT_EQ(events->GetMaterializedCount(), count);
 }

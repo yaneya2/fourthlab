@@ -122,64 +122,64 @@ struct ProcessingResult {
 
 class HistoryBuffer {
 private:
-	MutableArraySequence<Event> events_;
-	std::size_t maxSize_;
+	MutableArraySequence<Event> events;
+	std::size_t maxSize;
 
 public:
-	explicit HistoryBuffer(std::size_t maxSize = 16) : events_(), maxSize_(maxSize) {
-		if (maxSize_ == 0) {
+	explicit HistoryBuffer(std::size_t maxSize = 16) : events(), maxSize(maxSize) {
+		if (maxSize == 0) {
 			throw std::invalid_argument("History size must be positive");
 		}
 	}
 
 	void Add(const Event &event) {
-		if (events_.GetLength() == maxSize_) {
-			events_.Del(0);
+		if (events.GetLength() == maxSize) {
+			events.Del(0);
 		}
-		events_.Append(event);
+		events.Append(event);
 	}
 
 	[[nodiscard]] std::size_t GetLength() const {
-		return events_.GetLength();
+		return events.GetLength();
 	}
 
 	[[nodiscard]] std::size_t GetMaxSize() const {
-		return maxSize_;
+		return maxSize;
 	}
 
 	[[nodiscard]] bool CanPredict(std::size_t minimumCount) const {
-		return events_.GetLength() >= minimumCount;
+		return events.GetLength() >= minimumCount;
 	}
 
 	[[nodiscard]] Event Get(std::size_t index) const {
-		return events_.Get(index);
+		return events.Get(index);
 	}
 
 	Event GetFromEnd(std::size_t offset) const {
-		if (offset >= events_.GetLength()) {
+		if (offset >= events.GetLength()) {
 			throw std::out_of_range("History offset is out of range");
 		}
-		return events_.Get(events_.GetLength() - offset - 1);
+		return events.Get(events.GetLength() - offset - 1);
 	}
 };
 
 class DifferenceForecastModel {
 private:
-	std::size_t order_;
+	std::size_t order;
 
 public:
-	explicit DifferenceForecastModel(std::size_t order = 1) : order_(order) {
-		if (order_ != 1 && order_ != 2) {
+	explicit DifferenceForecastModel(std::size_t order = 1) : order(order) {
+		if (order != 1 && order != 2) {
 			throw std::invalid_argument("Forecast order must be 1 or 2");
 		}
 	}
 
 	[[nodiscard]] std::size_t GetOrder() const {
-		return order_;
+		return order;
 	}
 
 	[[nodiscard]] Prediction PredictNext(const HistoryBuffer &history, EventType type) const {
-		std::size_t requiredCount = order_ + 1;
+		std::size_t requiredCount = order + 1;
 		if (!history.CanPredict(requiredCount)) {
 			return Prediction{false, type, 0.0, 0.0};
 		}
@@ -189,26 +189,26 @@ public:
 		double firstDifference = current - previous;
 		double prediction = current + firstDifference;
 
-		if (order_ == 2) {
+		if (order == 2) {
 			double beforePrevious = history.GetFromEnd(2).value;
 			double priorDifference = previous - beforePrevious;
 			prediction += firstDifference - priorDifference;
 		}
 
-		double confidence = order_ == 1 ? 0.75 : 0.90;
+		double confidence = order == 1 ? 0.75 : 0.90;
 		return Prediction{true, type, prediction, confidence};
 	}
 };
 
 class CorrectionService {
 private:
-	double warningThreshold_;
-	double criticalThreshold_;
+	double warningThreshold;
+	double criticalThreshold;
 
 public:
 	CorrectionService(double warningThreshold, double criticalThreshold)
-		: warningThreshold_(warningThreshold), criticalThreshold_(criticalThreshold) {
-		if (warningThreshold_ < 0.0 || criticalThreshold_ < warningThreshold_) {
+		: warningThreshold(warningThreshold), criticalThreshold(criticalThreshold) {
+		if (warningThreshold < 0.0 || criticalThreshold < warningThreshold) {
 			throw std::invalid_argument("Invalid correction thresholds");
 		}
 	}
@@ -224,8 +224,8 @@ public:
 			true,
 			error,
 			absoluteError,
-			absoluteError >= warningThreshold_,
-			absoluteError >= criticalThreshold_
+			absoluteError >= warningThreshold,
+			absoluteError >= criticalThreshold
 		};
 	}
 };
@@ -248,111 +248,111 @@ public:
 
 class ForecastCorrectionProcessor {
 private:
-	MutableArraySequence<std::shared_ptr<HistoryBuffer> > histories_;
-	DifferenceForecastModel model_;
-	CorrectionService correctionService_;
-	DecisionMaker decisionMaker_;
-	MutableArraySequence<Prediction> pendingPredictions_;
+	MutableArraySequence<std::shared_ptr<HistoryBuffer> > histories;
+	DifferenceForecastModel model;
+	CorrectionService correctionService;
+	DecisionMaker decisionMaker;
+	MutableArraySequence<Prediction> pendingPredictions;
 
 	void SetPendingPrediction(std::size_t index, const Prediction &prediction) {
-		pendingPredictions_.Del(index);
-		pendingPredictions_.InsertAt(prediction, index);
+		pendingPredictions.Del(index);
+		pendingPredictions.InsertAt(prediction, index);
 	}
 
 public:
 	ForecastCorrectionProcessor(std::size_t order, std::size_t historySize,
 	                            double warningThreshold, double criticalThreshold)
-		: histories_(),
-		  model_(order),
-		  correctionService_(warningThreshold, criticalThreshold),
-		  decisionMaker_(),
-		  pendingPredictions_{} {
+		: histories(),
+		  model(order),
+		  correctionService(warningThreshold, criticalThreshold),
+		  decisionMaker(),
+		  pendingPredictions{} {
 		if (historySize < order + 1) {
 			throw std::invalid_argument("History size is too small for forecast order");
 		}
 
 		for (std::size_t i = 0; i < 4; ++i) {
-			histories_.Append(std::shared_ptr<HistoryBuffer>(new HistoryBuffer(historySize)));
-			pendingPredictions_.Append(Prediction{});
+			histories.Append(std::shared_ptr<HistoryBuffer>(new HistoryBuffer(historySize)));
+			pendingPredictions.Append(Prediction{});
 		}
 	}
 
 	ProcessingResult Process(const Event &event) {
 		std::size_t typeIndex = EventTypeIndex(event.type);
-		Prediction previousPrediction = pendingPredictions_.Get(typeIndex);
-		Correction correction = correctionService_.Compare(previousPrediction, event);
+		Prediction previousPrediction = pendingPredictions.Get(typeIndex);
+		Correction correction = correctionService.Compare(previousPrediction, event);
 		Reaction reaction = DecisionMaker::MakeReaction(event, correction);
 
-		std::shared_ptr<HistoryBuffer> history = histories_.Get(typeIndex);
+		std::shared_ptr<HistoryBuffer> history = histories.Get(typeIndex);
 		history->Add(event);
-		Prediction nextPrediction = model_.PredictNext(*history, event.type);
+		Prediction nextPrediction = model.PredictNext(*history, event.type);
 		SetPendingPrediction(typeIndex, nextPrediction);
 
 		return ProcessingResult{event, previousPrediction, correction, reaction, nextPrediction};
 	}
 
 	[[nodiscard]] const HistoryBuffer &GetHistory(EventType type) const {
-		return *histories_.Get(EventTypeIndex(type));
+		return *histories.Get(EventTypeIndex(type));
 	}
 
 	[[nodiscard]] Prediction GetPendingPrediction(EventType type) const {
-		return pendingPredictions_.Get(EventTypeIndex(type));
+		return pendingPredictions.Get(EventTypeIndex(type));
 	}
 };
 
 class ProcessingStatistics {
 private:
-	std::size_t total_;
-	std::size_t normal_;
-	std::size_t warning_;
-	std::size_t critical_;
-	std::size_t noPrediction_;
-	double absoluteErrorSum_;
-	double maximumAbsoluteError_;
+	std::size_t total;
+	std::size_t normal;
+	std::size_t warning;
+	std::size_t critical;
+	std::size_t noPrediction;
+	double absoluteErrorSum;
+	double maximumAbsoluteError;
 
 public:
 	ProcessingStatistics()
-		: total_(0), normal_(0), warning_(0), critical_(0), noPrediction_(0),
-		  absoluteErrorSum_(0.0), maximumAbsoluteError_(0.0) {
+		: total(0), normal(0), warning(0), critical(0), noPrediction(0),
+		  absoluteErrorSum(0.0), maximumAbsoluteError(0.0) {
 	}
 
 	void Add(const ProcessingResult &result) {
-		++total_;
+		++total;
 		switch (result.reaction.type) {
 			case ReactionType::Normal:
-				++normal_;
+				++normal;
 				break;
 			case ReactionType::Warning:
-				++warning_;
+				++warning;
 				break;
 			case ReactionType::Critical:
-				++critical_;
+				++critical;
 				break;
 			case ReactionType::NoPrediction:
-				++noPrediction_;
+				++noPrediction;
 				break;
 		}
 		if (result.correction.hasCorrection) {
-			absoluteErrorSum_ += result.correction.absoluteError;
-			if (result.correction.absoluteError > maximumAbsoluteError_) {
-				maximumAbsoluteError_ = result.correction.absoluteError;
+			absoluteErrorSum += result.correction.absoluteError;
+			if (result.correction.absoluteError > maximumAbsoluteError) {
+				maximumAbsoluteError = result.correction.absoluteError;
 			}
 		}
 	}
 
-	[[nodiscard]] std::size_t GetTotal() const { return total_; }
-	[[nodiscard]] std::size_t GetNormalCount() const { return normal_; }
-	[[nodiscard]] std::size_t GetWarningCount() const { return warning_; }
-	[[nodiscard]] std::size_t GetCriticalCount() const { return critical_; }
-	[[nodiscard]] std::size_t GetNoPredictionCount() const { return noPrediction_; }
+	[[nodiscard]] std::size_t GetTotal() const { return total; }
+	[[nodiscard]] std::size_t GetNormalCount() const { return normal; }
+	[[nodiscard]] std::size_t GetWarningCount() const { return warning; }
+	[[nodiscard]] std::size_t GetCriticalCount() const { return critical; }
+	[[nodiscard]] std::size_t GetNoPredictionCount() const { return noPrediction; }
 
 	[[nodiscard]] double GetMeanAbsoluteError() const {
-		std::size_t corrected = total_ - noPrediction_;
-		return corrected == 0 ? 0.0 : absoluteErrorSum_ / static_cast<double>(corrected);
+		std::size_t corrected = total - noPrediction;
+		return corrected == 0 ? 0.0 : absoluteErrorSum / static_cast<double>(corrected);
 	}
 
 	[[nodiscard]] double GetMaximumAbsoluteError() const {
-		return maximumAbsoluteError_;
+		return maximumAbsoluteError;
 	}
 };
 

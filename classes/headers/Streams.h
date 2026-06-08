@@ -65,53 +65,53 @@ public:
 template<class T>
 class SequenceReadStream : public ReadOnlyStream<T> {
 private:
-	std::shared_ptr<Sequence<T> > source_;
-	std::unique_ptr<IEnumerator<T> > enumerator_;
-	std::size_t position_;
-	bool opened_;
+	std::shared_ptr<Sequence<T> > source;
+	std::unique_ptr<IEnumerator<T> > enumerator;
+	std::size_t position;
+	bool opened;
 
 public:
-	explicit SequenceReadStream(Sequence<T> &source)
-		: source_(std::shared_ptr<Sequence<T> >(&source, [](auto) {
+	explicit SequenceReadStream(Sequence<T> &sourceSequence)
+		: source(std::shared_ptr<Sequence<T> >(&sourceSequence, [](auto) {
 		  })),
-		  enumerator_(nullptr), position_(0), opened_(false) {
+		  enumerator(nullptr), position(0), opened(false) {
 	}
 
-	explicit SequenceReadStream(std::shared_ptr<Sequence<T> > source)
-		: source_(std::move(source)),
-		  enumerator_(nullptr), position_(0), opened_(false) {
-		if (!source_) {
+	explicit SequenceReadStream(std::shared_ptr<Sequence<T> > sourceSequence)
+		: source(std::move(sourceSequence)),
+		  enumerator(nullptr), position(0), opened(false) {
+		if (!source) {
 			throw std::invalid_argument("SequenceReadStream source is null");
 		}
 	}
 
 	void Open() override {
-		enumerator_ = std::unique_ptr<IEnumerator<T> >(source_->GetEnumerator());
-		position_ = 0;
-		opened_ = true;
+		enumerator = std::unique_ptr<IEnumerator<T> >(source->GetEnumerator());
+		position = 0;
+		opened = true;
 	}
 
 	void Close() override {
-		enumerator_.reset();
-		position_ = 0;
-		opened_ = false;
+		enumerator.reset();
+		position = 0;
+		opened = false;
 	}
 
 	[[nodiscard]] bool IsEndOfStream() const override {
-		return position_ >= source_->GetLength();
+		return position >= source->GetLength();
 	}
 
 	T Read() override {
 		EnsureOpened();
-		if (IsEndOfStream() || !enumerator_->MoveNext()) {
+		if (IsEndOfStream() || !enumerator->MoveNext()) {
 			throw EndOfStream("SequenceReadStream reached end");
 		}
-		++position_;
-		return enumerator_->Current();
+		++position;
+		return enumerator->Current();
 	}
 
 	[[nodiscard]] std::size_t GetPosition() const override {
-		return position_;
+		return position;
 	}
 
 	[[nodiscard]] bool IsCanSeek() const override {
@@ -120,19 +120,19 @@ public:
 
 	std::size_t Seek(std::size_t index) override {
 		EnsureOpened();
-		if (index > source_->GetLength()) {
+		if (index > source->GetLength()) {
 			throw EndOfStream("Seek index is out of range");
 		}
 
-		enumerator_ = std::unique_ptr<IEnumerator<T> >(source_->GetEnumerator());
-		position_ = 0;
-		while (position_ < index) {
-			if (!enumerator_->MoveNext()) {
+		enumerator = std::unique_ptr<IEnumerator<T> >(source->GetEnumerator());
+		position = 0;
+		while (position < index) {
+			if (!enumerator->MoveNext()) {
 				throw EndOfStream("Seek index is out of range");
 			}
-			++position_;
+			++position;
 		}
-		return position_;
+		return position;
 	}
 
 	[[nodiscard]] bool IsCanGoBack() const override {
@@ -141,7 +141,7 @@ public:
 
 private:
 	void EnsureOpened() const {
-		if (!opened_) {
+		if (!opened) {
 			throw StreamException("Stream is not opened");
 		}
 	}
@@ -150,38 +150,38 @@ private:
 template<class T>
 class LazySequenceReadStream : public ReadOnlyStream<T> {
 private:
-	std::shared_ptr<LazySequence<T> > source_;
-	std::size_t position_;
-	bool opened_;
+	std::shared_ptr<LazySequence<T> > source;
+	std::size_t position;
+	bool opened;
 
 public:
-	explicit LazySequenceReadStream(LazySequence<T> &source)
-		: source_(std::shared_ptr<LazySequence<T> >(&source, [](auto) {
+	explicit LazySequenceReadStream(LazySequence<T> &sourceSequence)
+		: source(std::shared_ptr<LazySequence<T> >(&sourceSequence, [](auto) {
 		  })),
-		  position_(0), opened_(false) {
+		  position(0), opened(false) {
 	}
 
-	explicit LazySequenceReadStream(std::shared_ptr<LazySequence<T> > source)
-		: source_(std::move(source)),
-		  position_(0), opened_(false) {
-		if (!source_) {
+	explicit LazySequenceReadStream(std::shared_ptr<LazySequence<T> > sourceSequence)
+		: source(std::move(sourceSequence)),
+		  position(0), opened(false) {
+		if (!source) {
 			throw std::invalid_argument("LazySequenceReadStream source is null");
 		}
 	}
 
 	void Open() override {
-		position_ = 0;
-		opened_ = true;
+		position = 0;
+		opened = true;
 	}
 
 	void Close() override {
-		position_ = 0;
-		opened_ = false;
+		position = 0;
+		opened = false;
 	}
 
 	[[nodiscard]] bool IsEndOfStream() const override {
-		Ordinal length = source_->GetLength();
-		return length.IsFinite() && position_ >= length.FinitePart();
+		Ordinal length = source->GetLength();
+		return length.IsFinite() && position >= length.FinitePart();
 	}
 
 	T Read() override {
@@ -189,13 +189,13 @@ public:
 		if (IsEndOfStream()) {
 			throw EndOfStream("LazySequenceReadStream reached end");
 		}
-		T value = source_->Get(Ordinal::Finite(position_));
-		++position_;
+		T value = source->Get(Ordinal::Finite(position));
+		++position;
 		return value;
 	}
 
 	[[nodiscard]] std::size_t GetPosition() const override {
-		return position_;
+		return position;
 	}
 
 	[[nodiscard]] bool IsCanSeek() const override {
@@ -204,12 +204,12 @@ public:
 
 	std::size_t Seek(std::size_t index) override {
 		EnsureOpened();
-		Ordinal length = source_->GetLength();
+		Ordinal length = source->GetLength();
 		if (length.IsFinite() && index > length.FinitePart()) {
 			throw EndOfStream("Seek index is out of range");
 		}
-		position_ = index;
-		return position_;
+		position = index;
+		return position;
 	}
 
 	[[nodiscard]] bool IsCanGoBack() const override {
@@ -218,7 +218,7 @@ public:
 
 private:
 	void EnsureOpened() const {
-		if (!opened_) {
+		if (!opened) {
 			throw StreamException("Stream is not opened");
 		}
 	}
@@ -227,55 +227,55 @@ private:
 template<class T>
 class StringReadStream : public ReadOnlyStream<T> {
 private:
-	std::string source_;
-	std::function<T(const std::string &)> deserializer_;
-	std::istringstream input_;
-	std::size_t position_;
-	bool opened_;
-	bool endReached_;
+	std::string source;
+	std::function<T(const std::string &)> deserializer;
+	std::istringstream input;
+	std::size_t position;
+	bool opened;
+	bool endReached;
 
 public:
-	StringReadStream(std::string source, std::function<T(const std::string &)> deserializer)
-		: source_(std::move(source)), deserializer_(std::move(deserializer)), input_(), position_(0),
-		  opened_(false), endReached_(false) {
-		if (!deserializer_) {
+	StringReadStream(std::string text, std::function<T(const std::string &)> itemDeserializer)
+		: source(std::move(text)), deserializer(std::move(itemDeserializer)), input(), position(0),
+		  opened(false), endReached(false) {
+		if (!deserializer) {
 			throw std::invalid_argument("Deserializer is empty");
 		}
 	}
 
 	void Open() override {
-		input_.clear();
-		input_.str(source_);
-		position_ = 0;
-		opened_ = true;
-		endReached_ = false;
+		input.clear();
+		input.str(source);
+		position = 0;
+		opened = true;
+		endReached = false;
 	}
 
 	void Close() override {
-		input_.clear();
-		input_.str("");
-		position_ = 0;
-		opened_ = false;
-		endReached_ = false;
+		input.clear();
+		input.str("");
+		position = 0;
+		opened = false;
+		endReached = false;
 	}
 
 	bool IsEndOfStream() const override {
-		return endReached_;
+		return endReached;
 	}
 
 	T Read() override {
 		EnsureOpened();
 		std::string token;
-		if (!(input_ >> token)) {
-			endReached_ = true;
+		if (!(input >> token)) {
+			endReached = true;
 			throw EndOfStream("StringReadStream reached end");
 		}
-		++position_;
-		return deserializer_(token);
+		++position;
+		return deserializer(token);
 	}
 
 	std::size_t GetPosition() const override {
-		return position_;
+		return position;
 	}
 
 	bool IsCanSeek() const override {
@@ -284,20 +284,20 @@ public:
 
 	std::size_t Seek(std::size_t index) override {
 		EnsureOpened();
-		input_.clear();
-		input_.str(source_);
-		position_ = 0;
-		endReached_ = false;
+		input.clear();
+		input.str(source);
+		position = 0;
+		endReached = false;
 
 		std::string ignored;
-		while (position_ < index) {
-			if (!(input_ >> ignored)) {
-				endReached_ = true;
+		while (position < index) {
+			if (!(input >> ignored)) {
+				endReached = true;
 				throw EndOfStream("Seek index is out of string range");
 			}
-			++position_;
+			++position;
 		}
-		return position_;
+		return position;
 	}
 
 	bool IsCanGoBack() const override {
@@ -306,7 +306,7 @@ public:
 
 private:
 	void EnsureOpened() const {
-		if (!opened_) {
+		if (!opened) {
 			throw StreamException("Stream is not opened");
 		}
 	}
@@ -315,59 +315,59 @@ private:
 template<class T>
 class FileReadStream : public ReadOnlyStream<T> {
 private:
-	std::string filename_;
-	std::function<T(const std::string &)> deserializer_;
-	std::ifstream input_;
-	std::size_t position_;
-	bool opened_;
-	bool endReached_;
+	std::string filename;
+	std::function<T(const std::string &)> deserializer;
+	std::ifstream input;
+	std::size_t position;
+	bool opened;
+	bool endReached;
 
 public:
-	FileReadStream(std::string filename, std::function<T(const std::string &)> deserializer)
-		: filename_(std::move(filename)), deserializer_(std::move(deserializer)), input_(), position_(0),
-		  opened_(false), endReached_(false) {
-		if (!deserializer_) {
+	FileReadStream(std::string fileName, std::function<T(const std::string &)> itemDeserializer)
+		: filename(std::move(fileName)), deserializer(std::move(itemDeserializer)), input(), position(0),
+		  opened(false), endReached(false) {
+		if (!deserializer) {
 			throw std::invalid_argument("Deserializer is empty");
 		}
 	}
 
 	void Open() override {
 		Close();
-		input_.open(filename_);
-		if (!input_.is_open()) {
-			throw StreamException("Cannot open file for reading: " + filename_);
+		input.open(filename);
+		if (!input.is_open()) {
+			throw StreamException("Cannot open file for reading: " + filename);
 		}
-		position_ = 0;
-		opened_ = true;
-		endReached_ = false;
+		position = 0;
+		opened = true;
+		endReached = false;
 	}
 
 	void Close() override {
-		if (input_.is_open()) {
-			input_.close();
+		if (input.is_open()) {
+			input.close();
 		}
-		position_ = 0;
-		opened_ = false;
-		endReached_ = false;
+		position = 0;
+		opened = false;
+		endReached = false;
 	}
 
 	bool IsEndOfStream() const override {
-		return endReached_;
+		return endReached;
 	}
 
 	T Read() override {
 		EnsureOpened();
 		std::string line;
-		if (!std::getline(input_, line)) {
-			endReached_ = true;
+		if (!std::getline(input, line)) {
+			endReached = true;
 			throw EndOfStream("FileReadStream reached end");
 		}
-		++position_;
-		return deserializer_(line);
+		++position;
+		return deserializer(line);
 	}
 
 	std::size_t GetPosition() const override {
-		return position_;
+		return position;
 	}
 
 	bool IsCanSeek() const override {
@@ -376,23 +376,23 @@ public:
 
 	std::size_t Seek(std::size_t index) override {
 		EnsureOpened();
-		input_.clear();
-		input_.seekg(0, std::ios::beg);
-		if (!input_) {
-			throw StreamException("Cannot seek file: " + filename_);
+		input.clear();
+		input.seekg(0, std::ios::beg);
+		if (!input) {
+			throw StreamException("Cannot seek file: " + filename);
 		}
 
-		position_ = 0;
-		endReached_ = false;
+		position = 0;
+		endReached = false;
 		std::string ignored;
-		while (position_ < index) {
-			if (!std::getline(input_, ignored)) {
-				endReached_ = true;
+		while (position < index) {
+			if (!std::getline(input, ignored)) {
+				endReached = true;
 				throw EndOfStream("Seek index is out of file range");
 			}
-			++position_;
+			++position;
 		}
-		return position_;
+		return position;
 	}
 
 	bool IsCanGoBack() const override {
@@ -401,7 +401,7 @@ public:
 
 private:
 	void EnsureOpened() const {
-		if (!opened_) {
+		if (!opened) {
 			throw StreamException("Stream is not opened");
 		}
 	}
@@ -410,55 +410,55 @@ private:
 template<class T>
 class SequenceWriteStream : public WriteOnlyStream<T> {
 private:
-	std::shared_ptr<Sequence<T> > destination_;
-	std::size_t position_;
-	bool opened_;
+	std::shared_ptr<Sequence<T> > destination;
+	std::size_t position;
+	bool opened;
 
 public:
-	explicit SequenceWriteStream(Sequence<T> &destination)
-		: destination_(std::shared_ptr<Sequence<T> >(&destination, [](auto) {
+	explicit SequenceWriteStream(Sequence<T> &destinationSequence)
+		: destination(std::shared_ptr<Sequence<T> >(&destinationSequence, [](auto) {
 		  })),
-		  position_(0), opened_(false) {
+		  position(0), opened(false) {
 	}
 
-	explicit SequenceWriteStream(std::shared_ptr<Sequence<T> > destination)
-		: destination_(std::move(destination)),
-		  position_(0), opened_(false) {
-		if (!destination_) {
+	explicit SequenceWriteStream(std::shared_ptr<Sequence<T> > destinationSequence)
+		: destination(std::move(destinationSequence)),
+		  position(0), opened(false) {
+		if (!destination) {
 			throw std::invalid_argument("SequenceWriteStream destination is null");
 		}
 	}
 
 	void Open() override {
-		position_ = 0;
-		opened_ = true;
+		position = 0;
+		opened = true;
 	}
 
 	void Close() override {
-		position_ = 0;
-		opened_ = false;
+		position = 0;
+		opened = false;
 	}
 
 	std::size_t Write(const T &item) override {
 		EnsureOpened();
-		Sequence<T> *result = destination_->Append(item);
+		Sequence<T> *result = destination->Append(item);
 		if (result == nullptr) {
 			throw StreamException("SequenceWriteStream append returned null");
 		}
-		if (result != destination_.get()) {
-			destination_.reset(result);
+		if (result != destination.get()) {
+			destination.reset(result);
 		}
-		++position_;
-		return position_;
+		++position;
+		return position;
 	}
 
 	[[nodiscard]] std::size_t GetPosition() const override {
-		return position_;
+		return position;
 	}
 
 private:
 	void EnsureOpened() const {
-		if (!opened_) {
+		if (!opened) {
 			throw StreamException("Stream is not opened");
 		}
 	}
@@ -467,19 +467,19 @@ private:
 template<class T>
 class FileWriteStream : public WriteOnlyStream<T> {
 private:
-	std::string filename_;
-	std::function<std::string(const T &)> serializer_;
-	std::ofstream output_;
-	std::size_t position_;
-	bool opened_;
-	bool appendMode_;
+	std::string filename;
+	std::function<std::string(const T &)> serializer;
+	std::ofstream output;
+	std::size_t position;
+	bool opened;
+	bool appendMode;
 
 public:
-	FileWriteStream(std::string filename, std::function<std::string(const T &)> serializer,
-	                bool appendMode = false)
-		: filename_(std::move(filename)), serializer_(std::move(serializer)), output_(), position_(0),
-		  opened_(false), appendMode_(appendMode) {
-		if (!serializer_) {
+	FileWriteStream(std::string fileName, std::function<std::string(const T &)> itemSerializer,
+	                bool useAppendMode = false)
+		: filename(std::move(fileName)), serializer(std::move(itemSerializer)), output(), position(0),
+		  opened(false), appendMode(useAppendMode) {
+		if (!serializer) {
 			throw std::invalid_argument("Serializer is empty");
 		}
 	}
@@ -487,42 +487,42 @@ public:
 	void Open() override {
 		Close();
 		std::ios::openmode mode = std::ios::out;
-		if (appendMode_) {
+		if (appendMode) {
 			mode |= std::ios::app;
 		}
-		output_.open(filename_, mode);
-		if (!output_.is_open()) {
-			throw StreamException("Cannot open file for writing: " + filename_);
+		output.open(filename, mode);
+		if (!output.is_open()) {
+			throw StreamException("Cannot open file for writing: " + filename);
 		}
-		position_ = 0;
-		opened_ = true;
+		position = 0;
+		opened = true;
 	}
 
 	void Close() override {
-		if (output_.is_open()) {
-			output_.close();
+		if (output.is_open()) {
+			output.close();
 		}
-		position_ = 0;
-		opened_ = false;
+		position = 0;
+		opened = false;
 	}
 
 	std::size_t Write(const T &item) override {
 		EnsureOpened();
-		output_ << serializer_(item) << '\n';
-		if (!output_) {
-			throw StreamException("Cannot write to file: " + filename_);
+		output << serializer(item) << '\n';
+		if (!output) {
+			throw StreamException("Cannot write to file: " + filename);
 		}
-		++position_;
-		return position_;
+		++position;
+		return position;
 	}
 
 	std::size_t GetPosition() const override {
-		return position_;
+		return position;
 	}
 
 private:
 	void EnsureOpened() const {
-		if (!opened_) {
+		if (!opened) {
 			throw StreamException("Stream is not opened");
 		}
 	}
